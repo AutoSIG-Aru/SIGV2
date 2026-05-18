@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA routing: toda rota desconhecida serve o index.html
+# Sem isso, /auth /dashboard /login retornam 404 ao recarregar a página
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
