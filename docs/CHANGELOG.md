@@ -132,3 +132,52 @@ Formulário público de solicitação de validação, camada Supabase, geração
 | `workflows/sig-novo-requerimento.json` | **Criado** — workflow n8n: submissão → e-mail aluno + e-mail SIG |
 | `workflows/sig-mudanca-status.json` | **Criado** — workflow n8n: status change → Switch → e-mail aluno/coord/SIG |
 | `workflows/README.md` | **Criado** — instruções de importação, configuração SMTP e testes curl |
+
+---
+
+## [Fase 8] Deploy em produção — Vercel
+
+**Objetivo:** Publicar a aplicação em produção e consolidar a configuração de plataforma.
+
+| Arquivo | Ação |
+|---|---|
+| `vercel.json` | Configuração de deploy: `npm run build`, output `dist`, rewrite SPA (`/* → /index.html`) |
+| `netlify.toml` | Mantido no repositório como alternativa de plataforma, mas **o deploy ativo é na Vercel** |
+
+### Variáveis configuradas na Vercel (Settings → Environment Variables)
+
+```env
+VITE_SUPABASE_URL=https://sygcnmuyhfacujmsaeus.supabase.co
+VITE_SUPABASE_ANON_KEY=<anon key do projeto>
+
+VITE_N8N_BASE_URL=https://n8n.pide.ufsc.br
+VITE_N8N_WEBHOOK_URL=https://n8n.pide.ufsc.br/webhook/sig-requerimento
+VITE_N8N_WEBHOOK_STATUS=https://n8n.pide.ufsc.br/webhook/sig-status
+VITE_N8N_WEBHOOK_AI=https://n8n.pide.ufsc.br/webhook/sig-analise-ia
+VITE_N8N_WEBHOOK_HISTORICO=https://n8n.pide.ufsc.br/webhook/sig/curriculo/historico
+```
+
+### Redirect URL adicionada no Supabase Auth (produção)
+
+Em **Authentication → URL Configuration → Redirect URLs**:
+```
+https://<projeto>.vercel.app/auth
+```
+
+---
+
+## [Fase 9] Workflows completos do n8n — pasta n8n/
+
+**Objetivo:** Adicionar o conjunto completo de workflows de automação organizados por categoria.
+
+| Pasta / Arquivo | O que faz |
+|---|---|
+| `n8n/db/workflow_0_limpar_banco.json` | Limpa dados do banco (uso em reset/testes) |
+| `n8n/db/workflow_1_criar_banco.json` | Cria a estrutura de banco via n8n |
+| `n8n/db/workflow_2_sync_diario.json` | Sincronização diária de dados |
+| `n8n/db/workflow_3_purga_semestral.json` | Purga de dados antigos ao fim do semestre |
+| `n8n/notificações/workflow-A-novo-pedido.json` | E-mail ao aluno + aviso SIG a cada novo requerimento |
+| `n8n/notificações/workflow-B-mudanca-status.json` | E-mail por mudança de status (switch por destino) |
+| `n8n/notificações/workflow-C-relatorio-quinzenal.json` | Relatório quinzenal de requerimentos em aberto |
+| `n8n/notificações/workflow-E-erro-handler.json` | Captura e notifica erros nos demais workflows |
+| `n8n/workflow-D-analise-ia.json` | Análise de requerimentos com IA após submissão |

@@ -219,6 +219,22 @@ npm run build
 
 Configure as variáveis de ambiente do `.env` no painel da Vercel (Settings → Environment Variables).
 
+> **Nota:** o repositório contém também um `netlify.toml` (alternativa de plataforma), mas o deploy ativo é na Vercel. O `netlify.toml` pode ser ignorado.
+
+---
+
+## Ferramentas de desenvolvimento
+
+### `check_syntax.mjs`
+
+Script utilitário para verificar a sintaxe de todos os arquivos `.js`, `.jsx` e `.mjs` da pasta `src/` sem precisar rodar o Vite. Usa `@babel/parser` para parsear o código e reporta qualquer arquivo com erro de sintaxe.
+
+```bash
+node check_syntax.mjs
+```
+
+Útil para validar rapidamente o projeto antes de abrir um PR ou após mesclar mudanças.
+
 ---
 
 ## Conformidade legal
