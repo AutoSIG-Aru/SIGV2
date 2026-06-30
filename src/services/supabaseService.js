@@ -2,8 +2,9 @@
 //
 // Fluxo:
 //   1. RPC submeter_requerimento → grava requerimento + validações + disciplinas
-//   2. Upload de cada arquivo para Storage (bucket 'anexos')
-//   3. INSERT em public.anexos com os metadados de cada arquivo
+//      e retorna o id gerado.
+//   2. Upload de cada arquivo para Storage (bucket 'anexos').
+//   3. INSERT em public.anexos com os metadados de cada arquivo.
 //
 // Tudo usa a anon key (formulário público, aluno não autenticado).
 // ──────────────────────────────────────────────────────────────────────────────
@@ -16,22 +17,21 @@ import { supabase } from './supabase'
  * @param {Object} params
  * @param {Object} params.aluno       - Dados do aluno
  * @param {Array}  params.validacoes  - Array de validações
- * @param {string} params.protocolo   - Protocolo gerado no front
  * @param {Array}  params.documentos  - Array de { file: File, categoria: string }
  *
  * @returns {Promise<{ ok: boolean, requerimentoId?: number, error?: string, avisoAnexos?: string }>}
  */
-export async function salvarRequerimento({ aluno, validacoes, protocolo, documentos = [] }) {
+export async function salvarRequerimento({ aluno, validacoes, documentos = [], tipo = 'validacao' }) {
   // ── 1. Dados estruturados via RPC (atômico) ──────────────────────────────────
   const payload = {
-    protocolo,
-    data_envio:  new Date().toISOString(),
-    nome_aluno:  aluno.nome,
-    matricula:   aluno.matricula,
-    cpf:         aluno.cpf      || '',
-    curso:       aluno.curso,
-    email:       aluno.email,
-    telefone:    aluno.telefone || '',
+    data_envio:        new Date().toISOString(),
+    nome_aluno:        aluno.nome,
+    matricula:         aluno.matricula,
+    cpf:               aluno.cpf      || '',
+    curso:             aluno.curso,
+    email:             aluno.email,
+    telefone:          aluno.telefone || '',
+    tipo_requerimento: tipo,
     validacoes:  validacoes.map((v, i) => ({
       indice:        i,
       tipo:          v.mesmaInstituicao ? 'interna' : 'externa',
@@ -61,18 +61,16 @@ export async function salvarRequerimento({ aluno, validacoes, protocolo, documen
 
   // ── 2. Upload de arquivos para o Storage ─────────────────────────────────────
   if (documentos.length === 0) {
-    return { ok: true, requerimentoId }
+    return { ok: true, requerimentoId, storagePaths: [] }
   }
 
-  const falhas = []
+  const falhas      = []
+  const storagePaths = []   // paths retornados ao submissionService para repassar ao n8n
 
   for (const { file, categoria } of documentos) {
-    // Path: {requerimentoId}/{categoria}/{nome_original}
-    // Garante unicidade adicionando timestamp se o nome repetir
-    const nomeSeguro = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const nomeSeguro  = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
     const storagePath = `${requerimentoId}/${categoria}/${nomeSeguro}`
 
-    // Upload para o bucket 'anexos'
     const { error: uploadError } = await supabase.storage
       .from('anexos')
       .upload(storagePath, file, {
@@ -101,12 +99,15 @@ export async function salvarRequerimento({ aluno, validacoes, protocolo, documen
     if (metaError) {
       console.error(`[Supabase] Erro ao salvar metadados de ${file.name}:`, metaError)
       falhas.push(file.name)
+      continue
     }
+
+    storagePaths.push({ categoria, storage_path: storagePath, nome_original: file.name })
   }
 
   const avisoAnexos = falhas.length > 0
     ? `${falhas.length} arquivo(s) não foram enviados: ${falhas.join(', ')}.`
     : null
 
-  return { ok: true, requerimentoId, avisoAnexos }
+  return { ok: true, requerimentoId, storagePaths, avisoAnexos }
 }

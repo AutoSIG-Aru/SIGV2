@@ -1,18 +1,30 @@
 import { useState, useEffect, useCallback } from 'react'
 import StaffLayout from '../../layouts/StaffLayout'
-import { supabase } from '../../services/supabase'
+import { onAuthChange, getSession } from '../../services/authService'
+import { gerarFormularioCoordPDF } from '../../services/pdfCoordenacao'
+import { buscarCargaHorariasDisciplinas } from '../../services/curriculoService'
+import {
+  buscarRequerimento,
+  buscarValidacoes,
+  buscarAnexos,
+  buscarEventos,
+  buscarPerfil,
+  atualizarNumeroProcesso,
+  salvarDecisoes as persistirDecisoes,
+  gerarUrlAnexo,
+  baixarAnexos,
+} from '../../services/requerimentosService'
+import { alterarStatus } from '../../services/statusService'
 
 // ── Config visual de status ────────────────────────────────────────────────────
 const STATUS_CFG = {
-  novo:               { label: 'Novo',               cor: '#475569', bg: '#f1f5f9' },
-  em_revisao_ia:      { label: 'Revisão IA',         cor: '#7c3aed', bg: '#f5f3ff' },
-  triagem_sig:        { label: 'Triagem SIG',        cor: '#64748b', bg: '#f8fafc' },
-  em_analise_coord:   { label: 'Análise SIG',        cor: '#1d4ed8', bg: '#eff6ff' },
-  parecer_coord:      { label: 'Parecer Coord.',     cor: '#1d4ed8', bg: '#e0f2fe' },
-  aprovado:           { label: 'Aprovado',            cor: '#15803d', bg: '#f0fdf4' },
-  rejeitado:          { label: 'Rejeitado',           cor: '#b91c1c', bg: '#fef2f2' },
-  revisao_solicitada: { label: 'Revisão Solicitada', cor: '#c2410c', bg: '#fff7ed' },
-  cancelado:          { label: 'Cancelado',           cor: '#9ca3af', bg: '#f9fafb' },
+  novo:             { label: 'Novo',           cor: '#475569', bg: '#f1f5f9' },
+  em_revisao_ia:   { label: 'Revisão IA',     cor: '#7c3aed', bg: '#f5f3ff' },
+  triagem_sig:     { label: 'Triagem SIG',    cor: '#64748b', bg: '#f8fafc' },
+  em_analise_coord:{ label: 'Análise SIG',    cor: '#1d4ed8', bg: '#eff6ff' },
+  parecer_coord:      { label: 'Parecer Coord.',    cor: '#1d4ed8', bg: '#e0f2fe' },
+  revisao_solicitada: { label: 'Revisão Solicitada', cor: '#b45309', bg: '#fffbeb' },
+  concluido:          { label: 'Concluído',          cor: '#15803d', bg: '#f0fdf4' },
 }
 
 const CATEGORIA_CFG = {
@@ -29,16 +41,14 @@ const FASES_DISPONIVEIS = [
   { status: 'triagem_sig',      label: 'Triagem SIG',    cor: '#64748b' },
   { status: 'em_analise_coord', label: 'Em análise SIG', cor: '#1d4ed8' },
   { status: 'parecer_coord',    label: 'Coordenação',    cor: '#1d4ed8' },
-  { status: 'aprovado',         label: 'Aprovado',        cor: '#15803d' },
-  { status: 'rejeitado',        label: 'Rejeitado',       cor: '#b91c1c' },
+  { status: 'concluido',        label: 'Concluído',       cor: '#15803d' },
 ]
 
 const ABAS = [
-  { id: 'geral',       label: 'Informações Gerais' },
-  { id: 'documentos',  label: 'Documentos'          },
-  { id: 'tarefas',     label: 'Tarefas da Etapa'   },
-  { id: 'historico',   label: 'Histórico'           },
-  { id: 'comentarios', label: 'Comentários'         },
+  { id: 'geral',      label: 'Informações Gerais' },
+  { id: 'documentos', label: 'Documentos'          },
+  { id: 'tarefas',    label: 'Tarefas da Etapa'   },
+  { id: 'historico',  label: 'Histórico'           },
 ]
 
 // ── Badge ──────────────────────────────────────────────────────────────────────
@@ -57,7 +67,7 @@ function Badge({ label, cor, bg }) {
 // ── Seção com título ───────────────────────────────────────────────────────────
 function Secao({ titulo, children, style = {} }) {
   return (
-    <div className="form-card" style={{ marginBottom: 0, ...style }}>
+    <div className="form-card" style={{ marginBottom: 0, position: 'relative', zIndex: 0, ...style }}>
       <div style={{
         fontWeight: 700, fontSize: 14, color: '#1e293b',
         paddingBottom: 12, marginBottom: 16,
@@ -131,12 +141,13 @@ function AbaDocumentos({ anexos }) {
     setUrl(null)
     setErroUrl(false)
     setCarregando(true)
-    const { data, error } = await supabase.storage
-      .from('anexos')
-      .createSignedUrl(anexo.storage_path, 3600)
+    try {
+      const signedUrl = await gerarUrlAnexo(anexo.storage_path)
+      setUrl(signedUrl)
+    } catch {
+      setErroUrl(true)
+    }
     setCarregando(false)
-    if (error || !data?.signedUrl) { setErroUrl(true); return }
-    setUrl(data.signedUrl)
   }
 
   if (anexos.length === 0) {
@@ -153,16 +164,9 @@ function AbaDocumentos({ anexos }) {
   const catCfgSel = selecionado ? (CATEGORIA_CFG[selecionado.categoria] || { label: selecionado.categoria, cor: '#888', bg: '#f5f5f5' }) : null
 
   return (
-    <div style={{
-      display: 'flex', gap: 16,
-      height: 'calc(100vh - 280px)', minHeight: 480,
-    }}>
-      {/* ── Lista de documentos (esquerda) ── */}
-      <div style={{
-        width: 280, flexShrink: 0,
-        display: 'flex', flexDirection: 'column', gap: 6,
-        overflowY: 'auto', paddingRight: 4,
-      }}>
+    <div className="detalhe-docs-split">
+      {/* ── Lista de documentos (esquerda / topo em mobile) ── */}
+      <div className="detalhe-docs-lista">
         {anexos.map(a => {
           const catCfg   = CATEGORIA_CFG[a.categoria] || { label: a.categoria, cor: '#888', bg: '#f5f5f5' }
           const tamanho  = a.tamanho_bytes ? `${(a.tamanho_bytes / 1024).toFixed(0)} KB` : null
@@ -196,9 +200,9 @@ function AbaDocumentos({ anexos }) {
         })}
       </div>
 
-      {/* ── Painel de preview (direita) ── */}
+      {/* ── Painel de preview (direita / baixo em mobile) ── */}
       <div style={{
-        flex: 1, minWidth: 0,
+        flex: 1, minWidth: 0, minHeight: 360,
         border: '1px solid #e2e8f0', borderRadius: 12,
         background: '#f8fafc',
         display: 'flex', flexDirection: 'column',
@@ -315,84 +319,275 @@ function AbaDocumentos({ anexos }) {
 
 // ── Componente principal ───────────────────────────────────────────────────────
 export default function RequerimentoDetalhe({ id, navigate }) {
-  const [loading, setLoading]       = useState(true)
-  const [req, setReq]               = useState(null)
-  const [validacoes, setValidacoes] = useState([])
-  const [anexos, setAnexos]         = useState([])
-  const [eventos, setEventos]       = useState([])
-  const [erro, setErro]             = useState(null)
-  const [aba, setAba]               = useState('geral')
+  const [loading, setLoading]           = useState(true)
+  const [req, setReq]                   = useState(null)
+  const [validacoes, setValidacoes]     = useState([])
+  const [anexos, setAnexos]             = useState([])
+  const [eventos, setEventos]           = useState([])
+  const [erro, setErro]                 = useState(null)
+  const [aba, setAba]                   = useState('geral')
+  const [perfilUsuario, setPerfilUsuario] = useState(null)
 
   // Alteração de fase
   const [menuFaseAberto, setMenuFaseAberto] = useState(false)
   const [salvandoFase, setSalvandoFase]     = useState(false)
   const [erroFase, setErroFase]             = useState(null)
+
+  // Tarefas SIG
+  const [tarefaSpaIniciada,   setTarefaSpaIniciada]   = useState(false)
+  const [tarefaSpaConfirmada, setTarefaSpaConfirmada] = useState(false)
+  const [numeroProcesso,      setNumeroProcesso]      = useState('')
+  const [editandoProcesso,    setEditandoProcesso]    = useState(false)
+  const [salvandoProcesso,    setSalvandoProcesso]    = useState(false)
+  const [erroProcesso,        setErroProcesso]        = useState(null)
+
+  // Tarefas Coordenação
+  // { [validacao_id]: { decisao, mencao, nota, cargaHoraria } }
+  const [decisoesCoord,        setDecisoesCoord]        = useState({})
+  const [decisoesSalvas,       setDecisoesSalvas]       = useState(false)
+  const [salvandoDecisoes,     setSalvandoDecisoes]     = useState(false)
+  const [erroDecisoes,         setErroDecisoes]         = useState(null)
+  const [gerandoPDF,           setGerandoPDF]           = useState(false)
+  const [tarefaPDFBaixado,     setTarefaPDFBaixado]     = useState(false)
+  const [tarefaSPACoordConf,   setTarefaSPACoordConf]   = useState(false)
+  const [observacoesCoord,     setObservacoesCoord]     = useState('')
   const carregarDados = useCallback(async () => {
     setLoading(true); setErro(null)
-
-    const { data: reqData, error: reqErr } = await supabase
-      .from('requerimentos').select('*').eq('id', id).single()
-    if (reqErr || !reqData) {
+    try {
+      const reqData = await buscarRequerimento(id)
+      setReq(reqData)
+      const [valsData, anexosData, eventosData] = await Promise.all([
+        buscarValidacoes(id),
+        buscarAnexos(id),
+        buscarEventos(id),
+      ])
+      setValidacoes(valsData)
+      setAnexos(anexosData)
+      setEventos(eventosData)
+    } catch {
       setErro('Requerimento não encontrado ou sem permissão de acesso.')
-      setLoading(false); return
     }
-    setReq(reqData)
-
-    const { data: valsData } = await supabase
-      .from('validacoes').select('*, disciplinas_cursadas(*)')
-      .eq('requerimento_id', id).order('indice')
-    setValidacoes(valsData || [])
-
-    const { data: anexosData } = await supabase
-      .from('anexos').select('*').eq('requerimento_id', id).order('enviado_em')
-    setAnexos(anexosData || [])
-
-    const { data: eventosData } = await supabase
-      .from('eventos_auditoria')
-      .select('*, autor:usuario_id(nome, perfil)')
-      .eq('requerimento_id', id)
-      .order('criado_em', { ascending: false })
-    setEventos(eventosData || [])
-
     setLoading(false)
   }, [id])
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) { navigate('/login'); return }
+    let active = true
+
+    // getSession() aguarda qualquer refresh em andamento e retorna a sessão real.
+    // Mais confiável que depender de INITIAL_SESSION, que pode chegar com session=null
+    // durante o ciclo de mount/unmount do React StrictMode.
+    async function init() {
+      const s = await getSession()
+      if (!active) return
+      if (!s) { navigate('/login'); return }
+      const perfil = await buscarPerfil(s.user.id)
+      if (!active) return
+      setPerfilUsuario(perfil)
       carregarDados()
+    }
+
+    // onAuthChange fica apenas como sentinela de SIGNED_OUT
+    const sub = onAuthChange((event) => {
+      if (event === 'SIGNED_OUT') navigate('/login')
     })
+
+    init()
+
+    return () => {
+      active = false
+      sub.unsubscribe()
+    }
   }, [id])
 
-  async function alterarFase(novoStatus) {
+  // Pré-preenche numero_processo ao carregar o req
+  useEffect(() => {
+    if (req?.numero_processo) setNumeroProcesso(req.numero_processo)
+  }, [req?.id])
+
+  // Inicializa decisoesCoord (com CH do currículo) e texto de observações
+  useEffect(() => {
+    if (validacoes.length === 0 || !req) return
+
+    async function inicializar() {
+      // Monta init base com o que já está salvo no banco
+      const init = {}
+      for (const v of validacoes) {
+        let ex = {}
+        try { ex = JSON.parse(v.decisao_observacao || '{}') } catch {}
+        init[v.id] = {
+          decisao:      v.decisao || null,
+          mencao:       ex.mencao        || '',
+          nota:         ex.nota          ?? null,
+          cargaHoraria: ex.carga_horaria || '',
+        }
+      }
+
+      // Para disciplinas sem CH salva, busca no currículo do curso
+      const semCH = validacoes.filter(v => !init[v.id].cargaHoraria && v.ufsc_codigo)
+      if (semCH.length > 0) {
+        const codigos = semCH.map(v => v.ufsc_codigo)
+        const mapaChCurriculo = await buscarCargaHorariasDisciplinas(req.curso, codigos)
+        for (const v of semCH) {
+          const ch = mapaChCurriculo[v.ufsc_codigo?.toUpperCase()]
+          if (ch != null) init[v.id].cargaHoraria = String(ch)
+        }
+      }
+
+      setDecisoesCoord(init)
+      setDecisoesSalvas(validacoes.every(v => Boolean(v.decisao)))
+
+      const textoAuto = gerarTextoObservacoes(validacoes, null)
+      if (textoAuto) setObservacoesCoord(textoAuto)
+    }
+
+    inicializar()
+  }, [validacoes.length, req?.id])
+
+  async function alterarFase(novoStatus, extras = {}) {
     setMenuFaseAberto(false)
     setSalvandoFase(true)
     setErroFase(null)
 
-    const { error } = await supabase.rpc('atualizar_status_requerimento', {
-      p_id:     Number(id),
-      p_status: novoStatus,
-    })
-
-    setSalvandoFase(false)
-
-    if (error) {
+    try {
+      await alterarStatus(req, novoStatus, extras)
+      setReq(prev => ({ ...prev, status: novoStatus }))
+      const eventos = await buscarEventos(id)
+      setEventos(eventos)
+    } catch (error) {
       setErroFase(`Não foi possível alterar a fase: ${error.message}`)
       setTimeout(() => setErroFase(null), 6000)
-      return
     }
 
-    // Atualiza status localmente
-    setReq(prev => ({ ...prev, status: novoStatus }))
-
-    // Recarrega eventos para mostrar o novo registro de auditoria
-    const { data } = await supabase
-      .from('eventos_auditoria')
-      .select('*, autor:usuario_id(nome, perfil)')
-      .eq('requerimento_id', id)
-      .order('criado_em', { ascending: false })
-    if (data) setEventos(data)
+    setSalvandoFase(false)
   }
+
+  // ── Funções de tarefas SIG ──────────────────────────────────────────────────
+  async function baixarDocumentosEAbrirSPA() {
+    await baixarAnexos(anexos)
+    window.open(
+      'https://sistemas.ufsc.br/login?service=https%3A%2F%2Fsolar.egestao.ufsc.br%2Fsolar%2F',
+      '_blank'
+    )
+    setTarefaSpaIniciada(true)
+  }
+
+  async function confirmarTarefaSpa() {
+    setTarefaSpaConfirmada(true)
+    if (req.numero_processo && ['triagem_sig', 'em_analise_coord'].includes(req.status)) {
+      await alterarFase('parecer_coord')
+    }
+  }
+
+  async function salvarNumeroProcesso() {
+    if (!numeroProcesso.trim()) return
+    setSalvandoProcesso(true)
+    setErroProcesso(null)
+    try {
+      await atualizarNumeroProcesso(id, numeroProcesso.trim())
+      setReq(prev => ({ ...prev, numero_processo: numeroProcesso.trim() }))
+      setEditandoProcesso(false)
+    } catch {
+      setSalvandoProcesso(false)
+      setErroProcesso('Não foi possível salvar o número do processo.')
+      setTimeout(() => setErroProcesso(null), 5000)
+      return
+    }
+    setSalvandoProcesso(false)
+    if (tarefaSpaConfirmada && ['triagem_sig', 'em_analise_coord'].includes(req.status)) {
+      await alterarFase('parecer_coord')
+    }
+  }
+
+  // ── Funções de tarefas Coordenação ──────────────────────────────────────────
+  function atualizarDecisaoCoord(validacaoId, campo, valor) {
+    setDecisoesCoord(prev => ({
+      ...prev,
+      [validacaoId]: { ...(prev[validacaoId] || {}), [campo]: valor },
+    }))
+    setDecisoesSalvas(false)
+  }
+
+  async function salvarDecisoes() {
+    setSalvandoDecisoes(true)
+    setErroDecisoes(null)
+    try {
+      await persistirDecisoes(decisoesCoord)
+    } catch {
+      setSalvandoDecisoes(false)
+      setErroDecisoes('Erro ao salvar algumas decisões. Tente novamente.')
+      return false
+    }
+    setSalvandoDecisoes(false)
+    // Atualiza validacoes localmente
+    setValidacoes(prev => prev.map(v => {
+      const d = decisoesCoord[v.id]
+      if (!d) return v
+      return {
+        ...v,
+        decisao: d.decisao,
+        decisao_observacao: JSON.stringify({
+          mencao:        d.mencao        || null,
+          nota:          d.nota          ?? null,
+          carga_horaria: d.cargaHoraria  || null,
+        }),
+      }
+    }))
+    setDecisoesSalvas(true)
+
+    // Regenera texto com todas as decisões (DEF e INDEF) com equivalências
+    const textoAtualizado = gerarTextoObservacoes(validacoes, decisoesCoord)
+    setObservacoesCoord(textoAtualizado)
+
+    return true
+  }
+
+  async function gerarEBaixarFormularioCoord() {
+    setGerandoPDF(true)
+    const ok = await salvarDecisoes()
+    if (!ok) { setGerandoPDF(false); return }
+    const valsComDecisao = validacoes.map(v => {
+      const d = decisoesCoord[v.id] || {}
+      return {
+        ...v,
+        decisao: d.decisao || v.decisao,
+        decisao_observacao: JSON.stringify({
+          mencao:        d.mencao        || null,
+          nota:          d.nota          ?? null,
+          carga_horaria: d.cargaHoraria  || null,
+        }),
+      }
+    })
+    await gerarFormularioCoordPDF(req, valsComDecisao, observacoesCoord)
+    window.open('https://assina.ufsc.br/', '_blank')
+    window.open(
+      'https://sistemas.ufsc.br/login?service=https%3A%2F%2Fsolar.egestao.ufsc.br%2Fsolar%2F',
+      '_blank'
+    )
+    setTarefaPDFBaixado(true)
+    setGerandoPDF(false)
+  }
+
+  async function confirmarEnvioSPACoord() {
+    setTarefaSPACoordConf(true)
+    if (req.status === 'parecer_coord') {
+      // Monta lista de decisões para notificar o aluno via n8n
+      const decisoesParaN8n = validacoes.map(v => {
+        const d = decisoesCoord[v.id] || {}
+        return {
+          ufsc_codigo: v.ufsc_codigo,
+          ufsc_nome:   v.ufsc_nome,
+          decisao:     d.decisao || v.decisao || null,
+          mencao:      d.mencao  || null,
+          nota:        d.nota    ?? null,
+        }
+      })
+      await alterarFase('concluido', {
+        decisoes:    decisoesParaN8n,
+        observacoes: observacoesCoord || null,
+      })
+    }
+  }
+
 
   if (loading) return (
     <StaffLayout navigate={navigate}>
@@ -416,6 +611,7 @@ export default function RequerimentoDetalhe({ id, navigate }) {
     </StaffLayout>
   )
 
+  const isCoord = perfilUsuario?.perfil === 'coordenacao'
   const statusCfg     = STATUS_CFG[req.status] || { label: req.status, cor: '#888', bg: '#f5f5f5' }
   const iaVeredicto   = req.sumario_ia?.veredicto
   const iaConfianca   = req.sumario_ia?.confianca
@@ -423,10 +619,16 @@ export default function RequerimentoDetalhe({ id, navigate }) {
     day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
   })
   const horasAberto = Math.round((Date.now() - new Date(req.criado_em)) / 3_600_000)
+  function formatarTempoAberto(horas) {
+    if (horas < 48)  return `${horas}h em aberto`
+    const dias = Math.round(horas / 24)
+    if (dias < 30)   return `${dias}d em aberto`
+    return `${Math.round(dias / 30)}m em aberto`
+  }
 
   return (
     <StaffLayout navigate={navigate}>
-      <div style={{ maxWidth: 1440, margin: '0 auto', padding: '20px 24px 40px' }}>
+      <div className="detalhe-container">
 
         {/* ── Cabeçalho ── */}
         <div className="form-card" style={{ marginBottom: 16 }}>
@@ -434,44 +636,79 @@ export default function RequerimentoDetalhe({ id, navigate }) {
             <button className="btn-back" onClick={() => navigate('/dashboard')} style={{ margin: 0, flexShrink: 0 }}>
               ← Painel
             </button>
+
+            {/* Bloco central — protocolo + nome + data */}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
                 <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 15, color: '#00499f' }}>
                   {req.protocolo}
                 </span>
+                <Badge {...statusCfg} />
+                {iaVeredicto && (
+                  <Badge
+                    label={`IA: ${iaVeredicto}${iaConfianca != null ? ` · ${Math.round(iaConfianca * 100)}%` : ''}`}
+                    cor={iaVeredicto === 'aprovado' ? '#15803d' : iaVeredicto === 'rejeitado' ? '#b91c1c' : '#b45309'}
+                    bg={iaVeredicto === 'aprovado'  ? '#f0fdf4' : iaVeredicto === 'rejeitado'  ? '#fef2f2' : '#fffbeb'}
+                  />
+                )}
+              </div>
 
-                {/* Badge de status + botão de alteração */}
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Badge {...statusCfg} />
+              {/* Banner de erro na alteração de fase */}
+              {erroFase && (
+                <div style={{
+                  marginTop: 8, padding: '8px 12px', borderRadius: 8,
+                  background: '#fff7ed', border: '1px solid #fed7aa',
+                  color: '#c2410c', fontSize: 12, fontWeight: 500,
+                }}>
+                  ⚠ {erroFase}
+                </div>
+              )}
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
+                {req.matricula && (
+                  <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: '#64748b', marginRight: 8 }}>
+                    {req.matricula} ·
+                  </span>
+                )}
+                {req.nome_aluno}
+              </div>
+              <div style={{ fontSize: 13, color: '#64748b' }}>
+                {dataFormatada} · {horasAberto > 72
+                  ? <span style={{ color: '#b91c1c', fontWeight: 600 }}>⚠ {formatarTempoAberto(horasAberto)}</span>
+                  : formatarTempoAberto(horasAberto)}
+              </div>
+            </div>
 
-                  <button
-                    onClick={() => setMenuFaseAberto(f => !f)}
-                    disabled={salvandoFase}
-                    title="Alterar fase do requerimento"
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                      border: '1px solid #e2e8f0', background: menuFaseAberto ? '#f1f5f9' : '#fff',
-                      color: '#475569', cursor: salvandoFase ? 'default' : 'pointer',
-                      transition: 'background 0.15s',
-                    }}
-                  >
-                    {salvandoFase ? 'Salvando…' : 'Alterar fase'}
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginTop: 1 }}>
-                      <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </button>
+            {/* Botão "Alterar fase" — lateral direita do cabeçalho */}
+            {(!isCoord || req.status === 'parecer_coord') && (
+              <div style={{ position: 'relative', flexShrink: 0, alignSelf: 'center' }}>
+                <button
+                  onClick={() => setMenuFaseAberto(f => !f)}
+                  disabled={salvandoFase}
+                  title="Alterar fase do requerimento"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    border: '1px solid #e2e8f0',
+                    background: menuFaseAberto ? '#f1f5f9' : '#fff',
+                    color: '#475569', cursor: salvandoFase ? 'default' : 'pointer',
+                    transition: 'background 0.15s', whiteSpace: 'nowrap',
+                  }}
+                >
+                  {salvandoFase ? 'Salvando…' : 'Alterar fase'}
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginTop: 1 }}>
+                    <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
 
-                  {/* Dropdown de fases */}
-                  {menuFaseAberto && (
-                    <>
-                      {/* Backdrop — fecha ao clicar fora sem usar document listeners */}
-                      <div
-                        style={{ position: 'fixed', inset: 0, zIndex: 199 }}
-                        onClick={() => setMenuFaseAberto(false)}
-                      />
+                {/* Dropdown de fases */}
+                {menuFaseAberto && (
+                  <>
+                    <div
+                      style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+                      onClick={() => setMenuFaseAberto(false)}
+                    />
                     <div style={{
-                      position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 200,
+                      position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200,
                       background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
                       boxShadow: '0 8px 24px rgba(0,0,0,0.10)',
                       minWidth: 220, padding: '6px 0', overflow: 'hidden',
@@ -479,7 +716,7 @@ export default function RequerimentoDetalhe({ id, navigate }) {
                       <div style={{ padding: '6px 14px 8px', fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                         Selecionar etapa
                       </div>
-                      {FASES_DISPONIVEIS.map(fase => {
+                      {(isCoord ? FASES_DISPONIVEIS.filter(f => f.status === 'concluido') : FASES_DISPONIVEIS).map(fase => {
                         const isAtual = req.status === fase.status
                         return (
                           <button
@@ -512,49 +749,17 @@ export default function RequerimentoDetalhe({ id, navigate }) {
                         )
                       })}
                     </div>
-                    </>
-                  )}
-                </div>
-
-                {iaVeredicto && (
-                  <Badge
-                    label={`IA: ${iaVeredicto}${iaConfianca != null ? ` · ${Math.round(iaConfianca * 100)}%` : ''}`}
-                    cor={iaVeredicto === 'aprovado' ? '#15803d' : iaVeredicto === 'rejeitado' ? '#b91c1c' : '#b45309'}
-                    bg={iaVeredicto === 'aprovado'  ? '#f0fdf4' : iaVeredicto === 'rejeitado'  ? '#fef2f2' : '#fffbeb'}
-                  />
+                  </>
                 )}
               </div>
-
-              {/* Banner de erro na alteração de fase */}
-              {erroFase && (
-                <div style={{
-                  marginTop: 8, padding: '8px 12px', borderRadius: 8,
-                  background: '#fff7ed', border: '1px solid #fed7aa',
-                  color: '#c2410c', fontSize: 12, fontWeight: 500,
-                }}>
-                  ⚠ {erroFase}
-                </div>
-              )}
-              <div style={{ fontSize: 18, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
-                {req.matricula && (
-                  <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 600, color: '#64748b', marginRight: 8 }}>
-                    {req.matricula} ·
-                  </span>
-                )}
-                {req.nome_aluno}
-              </div>
-              <div style={{ fontSize: 13, color: '#64748b' }}>
-                {dataFormatada} · {horasAberto > 72
-                  ? <span style={{ color: '#b91c1c', fontWeight: 600 }}>⚠ {horasAberto}h em aberto</span>
-                  : `${horasAberto}h em aberto`}
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
         {/* ── Abas ── */}
-        <div style={{ display: 'flex', marginBottom: 20, borderBottom: '2px solid #e2e8f0', overflowX: 'auto' }}>
+        <nav className="detalhe-abas">
           {ABAS.map(tab => {
+            const isActive = aba === tab.id
             const badge = tab.id === 'documentos' ? anexos.length
                         : tab.id === 'historico'  ? eventos.length
                         : null
@@ -563,20 +768,27 @@ export default function RequerimentoDetalhe({ id, navigate }) {
                 key={tab.id}
                 onClick={() => setAba(tab.id)}
                 style={{
-                  padding: '10px 20px', border: 'none', background: 'none',
-                  cursor: 'pointer', whiteSpace: 'nowrap',
-                  fontWeight: aba === tab.id ? 700 : 500, fontSize: 14,
-                  color: aba === tab.id ? '#00499f' : '#64748b',
-                  borderBottom: aba === tab.id ? '2px solid #00499f' : '2px solid transparent',
-                  marginBottom: '-2px', transition: 'color 0.15s',
-                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '12px 20px',
+                  border: 'none',
+                  boxShadow: isActive ? 'inset 0 -2px 0 #00499f' : 'none',
+                  backgroundColor: '#ffffff',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  fontWeight: isActive ? 700 : 500,
+                  fontSize: 14,
+                  color: isActive ? '#00499f' : '#64748b',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  transition: 'color 0.15s',
+                  outline: 'none',
                 }}
               >
                 {tab.label}
                 {badge != null && badge > 0 && (
                   <span style={{
-                    background: aba === tab.id ? '#00499f' : '#e2e8f0',
-                    color: aba === tab.id ? '#fff' : '#64748b',
+                    backgroundColor: isActive ? '#00499f' : '#e2e8f0',
+                    color: isActive ? '#ffffff' : '#64748b',
                     borderRadius: 20, padding: '0 7px',
                     fontSize: 11, fontWeight: 700, lineHeight: '18px',
                   }}>
@@ -586,19 +798,15 @@ export default function RequerimentoDetalhe({ id, navigate }) {
               </button>
             )
           })}
-        </div>
+        </nav>
 
         {/* ══ Aba: Informações Gerais ══════════════════════════════════════════ */}
         {aba === 'geral' && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(280px, 360px) 1fr',
-            gap: 16, alignItems: 'start',
-          }}>
+          <div className="detalhe-geral-grid">
             {/* Coluna esquerda: Dados + IA empilhados */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <Secao titulo="Dados do Aluno">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 24px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px' }}>
                   <Campo label="Nome completo" valor={req.nome_aluno} span />
                   <Campo label="Matrícula"     valor={req.matricula} />
                   <Campo label="CPF"           valor={req.cpf} />
@@ -608,7 +816,26 @@ export default function RequerimentoDetalhe({ id, navigate }) {
                 </div>
               </Secao>
 
-              <Secao titulo="Análise da IA">
+              <Secao titulo="Processo SIG" style={{ padding: '18px 22px' }}>
+                {req.numero_processo ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Número do processo
+                    </div>
+                    <div style={{
+                      fontFamily: 'monospace', fontSize: 14, fontWeight: 700, color: '#1e293b',
+                      backgroundColor: '#f0fdf4', border: '1px solid #86efac',
+                      borderRadius: 6, padding: '6px 12px', display: 'inline-block',
+                    }}>
+                      {req.numero_processo}
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>Número ainda não inserido.</p>
+                )}
+              </Secao>
+
+              <Secao titulo="Análise da IA" style={{ padding: '18px 22px' }}>
                 {req.sumario_ia ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -658,25 +885,47 @@ export default function RequerimentoDetalhe({ id, navigate }) {
         {aba === 'documentos' && <AbaDocumentos anexos={anexos} />}
 
         {/* ══ Aba: Tarefas ════════════════════════════════════════════════════ */}
-        {aba === 'tarefas' && (
-          <AbaPlaceholder
-            icone="📋"
-            titulo="Tarefas da Etapa"
-            descricao="Aqui serão exibidas as ações que a SIG e a coordenação precisam realizar para avançar o requerimento. Em breve."
+        {aba === 'tarefas' && req.status === 'parecer_coord' ? (
+          <AbaTarefasCoord
+            req={req}
+            validacoes={validacoes}
+            decisoesCoord={decisoesCoord}
+            onDecisaoChange={atualizarDecisaoCoord}
+            decisoesSalvas={decisoesSalvas}
+            salvandoDecisoes={salvandoDecisoes}
+            erroDecisoes={erroDecisoes}
+            onSalvarDecisoes={salvarDecisoes}
+            observacoesCoord={observacoesCoord}
+            onObservacoesChange={setObservacoesCoord}
+            gerandoPDF={gerandoPDF}
+            tarefaPDFBaixado={tarefaPDFBaixado}
+            onGerarPDF={gerarEBaixarFormularioCoord}
+            tarefaSPACoordConf={tarefaSPACoordConf}
+            onConfirmarSPACoord={confirmarEnvioSPACoord}
+            somenteLeitura={!isCoord}
           />
-        )}
+        ) : aba === 'tarefas' ? (
+          <AbaTarefasSIG
+            req={req}
+            anexos={anexos}
+            tarefaSpaIniciada={tarefaSpaIniciada}
+            tarefaSpaConfirmada={tarefaSpaConfirmada}
+            onBaixarEAbrirSPA={baixarDocumentosEAbrirSPA}
+            onConfirmarSpa={confirmarTarefaSpa}
+            numeroProcesso={numeroProcesso}
+            onNumeroProcessoChange={setNumeroProcesso}
+            onSalvarProcesso={salvarNumeroProcesso}
+            salvandoProcesso={salvandoProcesso}
+            erroProcesso={erroProcesso}
+            editandoProcesso={editandoProcesso}
+            onEditarProcesso={() => setEditandoProcesso(true)}
+            onCancelarEdicao={() => { setEditandoProcesso(false); setNumeroProcesso(req.numero_processo || '') }}
+          />
+        ) : null}
 
         {/* ══ Aba: Histórico ══════════════════════════════════════════════════ */}
         {aba === 'historico' && <AbaHistorico eventos={eventos} />}
 
-        {/* ══ Aba: Comentários ════════════════════════════════════════════════ */}
-        {aba === 'comentarios' && (
-          <AbaPlaceholder
-            icone="💬"
-            titulo="Comentários"
-            descricao="Espaço para anotações internas entre SIG e coordenação sobre este requerimento. Em breve."
-          />
-        )}
 
       </div>
 
@@ -686,10 +935,10 @@ export default function RequerimentoDetalhe({ id, navigate }) {
 
 // ── Helpers do histórico ───────────────────────────────────────────────────────
 const PERFIL_CFG = {
-  sig:   { label: 'SIG',         cor: '#1d4ed8', bg: '#eff6ff' },
-  coord: { label: 'Coordenação', cor: '#0369a1', bg: '#e0f2fe' },
-  admin: { label: 'Admin',       cor: '#7c3aed', bg: '#f5f3ff' },
-  aluno: { label: 'Aluno',       cor: '#475569', bg: '#f1f5f9' },
+  sig:          { label: 'SIG',         cor: '#1d4ed8', bg: '#eff6ff' },
+  coordenacao:  { label: 'Coordenação', cor: '#0369a1', bg: '#e0f2fe' },
+  admin:        { label: 'Admin',       cor: '#7c3aed', bg: '#f5f3ff' },
+  aluno:        { label: 'Aluno',       cor: '#475569', bg: '#f1f5f9' },
 }
 
 function parseStatusChange(descricao) {
@@ -738,7 +987,7 @@ function AbaHistorico({ eventos }) {
   }
 
   return (
-    <div className="form-card">
+    <div className="form-card" style={{}}>
       <div style={{
         fontWeight: 700, fontSize: 14, color: '#1e293b',
         paddingBottom: 12, marginBottom: 24, borderBottom: '1px solid #f1f5f9',
@@ -872,6 +1121,721 @@ function AbaHistorico({ eventos }) {
   )
 }
 
+// ── Helper: gera texto de observações com equivalências explícitas ─────────────
+function gerarTextoObservacoes(validacoes, decisoesMap) {
+  const linhas = []
+
+  for (const v of validacoes) {
+    const d      = decisoesMap?.[v.id] || {}
+    const decisao = d.decisao || v.decisao
+    if (!decisao) continue
+
+    // Lado UFSC
+    const ufscParts = [v.ufsc_codigo, v.ufsc_nome].filter(Boolean)
+    const ufsc = ufscParts.join(' ') || 'Disciplina UFSC'
+
+    // Disciplinas cursadas (equivalência)
+    const cursadas = v.disciplinas_cursadas || []
+    const equivParts = cursadas.map(c => {
+      const cod  = c.codigo ? `${c.codigo} ` : ''
+      const nome = c.nome   || ''
+      const inst = c.instituicao ? ` / ${c.instituicao}` : ''
+      const ch   = c.carga_horaria ? ` (${c.carga_horaria}h)` : ''
+      return `${cod}${nome}${inst}${ch}`.trim()
+    })
+    const equivStr = equivParts.length ? ` / ${equivParts.join('; ')}` : ''
+
+    if (decisao === 'aprovado') {
+      const nota   = d.nota   ?? null
+      const mencao = d.mencao || ''
+      const extras = [
+        nota !== null ? `Nota: ${nota.toFixed(1)}` : null,
+        mencao        ? `Menção: ${mencao}`         : null,
+      ].filter(Boolean).join(' | ')
+      linhas.push(`${ufsc}${equivStr} — DEFERIDO${extras ? '. ' + extras + '.' : '.'}`)
+    } else {
+      linhas.push(`${ufsc}${equivStr} — INDEFERIDO.`)
+    }
+  }
+
+  return linhas.join('\n')
+}
+
+// ── Aba Tarefas Coordenação ────────────────────────────────────────────────────
+const NOTAS_COORD = [6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0]
+
+function AbaTarefasCoord({
+  req, validacoes,
+  decisoesCoord, onDecisaoChange,
+  decisoesSalvas, salvandoDecisoes, erroDecisoes, onSalvarDecisoes,
+  observacoesCoord, onObservacoesChange,
+  gerandoPDF, tarefaPDFBaixado, onGerarPDF,
+  tarefaSPACoordConf, onConfirmarSPACoord,
+  somenteLeitura = false,
+}) {
+  const todasComDecisao = validacoes.length > 0 && validacoes.every(v => decisoesCoord[v.id]?.decisao)
+  const tarefaFormConcluida = todasComDecisao && decisoesSalvas
+  const concluidas = (tarefaFormConcluida ? 1 : 0) + (tarefaSPACoordConf ? 1 : 0)
+
+  const inputBase = {
+    padding: '4px 8px', borderRadius: 6, border: '1px solid #e2e8f0',
+    fontSize: 12, color: '#1e293b', background: '#fff', outline: 'none',
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 900 }}>
+
+      {somenteLeitura && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: '#fffbeb', border: '1px solid #fcd34d',
+          borderRadius: 8, padding: '10px 16px',
+          fontSize: 13, color: '#92400e',
+        }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+            <rect x="5" y="1" width="6" height="1.5" rx="0.75" fill="currentColor"/>
+            <path d="M3 7h10v7a1 1 0 01-1 1H4a1 1 0 01-1-1V7z" stroke="currentColor" strokeWidth="1.3" fill="none"/>
+            <path d="M5.5 7V5a2.5 2.5 0 015 0v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" fill="none"/>
+          </svg>
+          <span>Estas tarefas são de responsabilidade da coordenação. Você está visualizando em modo somente leitura.</span>
+        </div>
+      )}
+
+      <div style={{ pointerEvents: somenteLeitura ? 'none' : 'auto', opacity: somenteLeitura ? 0.7 : 1 }}>
+
+      {/* Cabeçalho com progresso */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15, color: '#1e293b' }}>Tarefas da Coordenação</div>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+            {concluidas} de 2 concluídas{tarefaSPACoordConf && ' · Avançando para Concluído…'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 90, height: 6, background: '#e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{
+              width: `${concluidas * 50}%`, height: '100%',
+              background: concluidas === 2 ? '#15803d' : '#00499f',
+              borderRadius: 6, transition: 'width 0.4s',
+            }} />
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: concluidas === 2 ? '#15803d' : '#64748b' }}>
+            {concluidas}/2
+          </span>
+        </div>
+      </div>
+
+      {/* ── Tarefa 1: Preencher formulário ── */}
+      <div style={{
+        border: `1.5px solid ${tarefaFormConcluida ? '#86efac' : '#e2e8f0'}`,
+        borderRadius: 10, background: tarefaFormConcluida ? '#f0fdf4' : '#fff',
+        padding: '16px 20px',
+      }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+            background: tarefaFormConcluida ? '#15803d' : '#00499f',
+            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, fontWeight: 700,
+          }}>
+            {tarefaFormConcluida ? '✓' : '1'}
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b', marginBottom: 4 }}>
+              Preencher formulário de validação
+            </div>
+            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, marginBottom: 14 }}>
+              Para cada disciplina, defina a decisão (DEF/INDEF), a menção e a nota atribuída.
+              Esses dados serão usados para gerar o formulário oficial UFSC.
+            </div>
+
+            {/* Tabela de disciplinas */}
+            <div className="detalhe-coord-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+              {/* Cabeçalho da tabela */}
+              <div className="detalhe-coord-header" style={{
+                padding: '6px 10px',
+                background: '#f8fafc', borderRadius: 7,
+                border: '1px solid #e2e8f0',
+                fontSize: 11, fontWeight: 700, color: '#64748b',
+                textTransform: 'uppercase', letterSpacing: '0.04em',
+              }}>
+                <span>Disciplina UFSC</span>
+                <span style={{ textAlign: 'center' }}>Decisão</span>
+                <span style={{ textAlign: 'center' }}>C.H. (horas)</span>
+                <span style={{ textAlign: 'center' }}>Menção</span>
+                <span style={{ textAlign: 'center' }}>Nota atribuída</span>
+              </div>
+
+              {/* Linhas por validação */}
+              {validacoes.map(v => {
+                const d = decisoesCoord[v.id] || { decisao: null, mencao: '', nota: null, cargaHoraria: '' }
+                const isDef   = d.decisao === 'aprovado'
+                const isIndef = d.decisao === 'rejeitado'
+
+                return (
+                  <div key={v.id} className="detalhe-coord-row" style={{
+                    padding: '10px',
+                    background: '#fff', borderRadius: 8,
+                    border: `1px solid ${isDef ? '#bbf7d0' : isIndef ? '#fecaca' : '#e2e8f0'}`,
+                  }}>
+                    {/* Disciplina */}
+                    <div>
+                      <div style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#00499f' }}>
+                        {v.ufsc_codigo}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#1e293b', marginTop: 2, lineHeight: 1.3 }}>
+                        {v.ufsc_nome}
+                      </div>
+                    </div>
+
+                    {/* DEF / INDEF */}
+                    <div>
+                      <div className="coord-mobile-label">Decisão</div>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          onClick={() => onDecisaoChange(v.id, 'decisao', isDef ? null : 'aprovado')}
+                          style={{
+                            flex: 1, padding: '5px 0', borderRadius: 6, border: 'none',
+                            fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            background: isDef ? '#15803d' : '#f1f5f9',
+                            color: isDef ? '#fff' : '#64748b',
+                            transition: 'background 0.15s',
+                          }}
+                        >DEF</button>
+                        <button
+                          onClick={() => onDecisaoChange(v.id, 'decisao', isIndef ? null : 'rejeitado')}
+                          style={{
+                            flex: 1, padding: '5px 0', borderRadius: 6, border: 'none',
+                            fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            background: isIndef ? '#b91c1c' : '#f1f5f9',
+                            color: isIndef ? '#fff' : '#64748b',
+                            transition: 'background 0.15s',
+                          }}
+                        >INDEF</button>
+                      </div>
+                    </div>
+
+                    {/* Carga horária */}
+                    <div>
+                      <div className="coord-mobile-label">C.H. (horas)</div>
+                      <input
+                        type="text"
+                        value={d.cargaHoraria}
+                        onChange={e => onDecisaoChange(v.id, 'cargaHoraria', e.target.value)}
+                        placeholder="Ex: 72h"
+                        style={{ ...inputBase, width: '100%', textAlign: 'center' }}
+                      />
+                    </div>
+
+                    {/* Menção */}
+                    <div>
+                      <div className="coord-mobile-label">Menção</div>
+                      <input
+                        type="text"
+                        value={d.mencao}
+                        onChange={e => onDecisaoChange(v.id, 'mencao', e.target.value.toUpperCase())}
+                        placeholder="A, B…"
+                        disabled={isIndef}
+                        style={{
+                          ...inputBase, width: '100%', textAlign: 'center',
+                          opacity: isIndef ? 0.4 : 1,
+                        }}
+                      />
+                    </div>
+
+                    {/* Nota (chips 6.0–10.0) */}
+                    <div style={{
+                      opacity: isIndef ? 0.4 : 1,
+                      pointerEvents: isIndef ? 'none' : 'auto',
+                    }}>
+                      <div className="coord-mobile-label">Nota atribuída</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                      {NOTAS_COORD.map(n => {
+                        const ativo = d.nota === n
+                        return (
+                          <button
+                            key={n}
+                            onClick={() => onDecisaoChange(v.id, 'nota', ativo ? null : n)}
+                            style={{
+                              padding: '3px 7px', borderRadius: 5, border: 'none',
+                              fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                              background: ativo ? '#00499f' : '#f1f5f9',
+                              color: ativo ? '#fff' : '#64748b',
+                              transition: 'background 0.1s',
+                            }}
+                          >{n.toFixed(1)}</button>
+                        )
+                      })}
+                      </div>{/* fim flex notas */}
+                    </div>{/* fim wrapper nota */}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Botão salvar */}
+            <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={onSalvarDecisoes}
+                disabled={!todasComDecisao || salvandoDecisoes}
+                style={{
+                  padding: '8px 20px', borderRadius: 8, border: 'none',
+                  background: (!todasComDecisao || salvandoDecisoes) ? '#e2e8f0' : '#00499f',
+                  color: (!todasComDecisao || salvandoDecisoes) ? '#94a3b8' : '#fff',
+                  fontSize: 13, fontWeight: 600,
+                  cursor: (!todasComDecisao || salvandoDecisoes) ? 'default' : 'pointer',
+                  transition: 'background 0.15s',
+                }}
+              >
+                {salvandoDecisoes ? 'Salvando…' : 'Salvar decisões'}
+              </button>
+              {tarefaFormConcluida && (
+                <span style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>
+                  ✓ Decisões salvas
+                </span>
+              )}
+              {!todasComDecisao && (
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                  Preencha a decisão de todas as disciplinas para salvar.
+                </span>
+              )}
+            </div>
+            {erroDecisoes && (
+              <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 6 }}>{erroDecisoes}</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Observações e justificativas (página 2 do formulário) ── */}
+      <div style={{
+        border: '1.5px solid #e2e8f0', borderRadius: 10,
+        background: '#fff', padding: '16px 20px',
+      }}>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: '#1e293b', marginBottom: 3 }}>
+            Observações e Justificativas
+          </div>
+          <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.5 }}>
+            Corresponde à <strong>página 2</strong> do formulário oficial —
+            "Espaço reservado para validação parcial de disciplinas, bem como, justificativa das validações indeferidas."
+            As disciplinas indeferidas são inseridas automaticamente; você pode complementar livremente.
+          </div>
+        </div>
+        <textarea
+          value={observacoesCoord}
+          onChange={e => onObservacoesChange(e.target.value)}
+          placeholder="As justificativas das disciplinas indeferidas aparecerão aqui automaticamente após salvar as decisões. Adicione observações complementares conforme necessário."
+          rows={8}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            padding: '10px 12px', borderRadius: 8,
+            border: '1px solid #e2e8f0',
+            fontSize: 13, color: '#1e293b', lineHeight: 1.7,
+            background: '#f8fafc', outline: 'none', resize: 'vertical',
+            fontFamily: 'inherit',
+            transition: 'border-color 0.15s',
+          }}
+          onFocus={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.background = '#fff' }}
+          onBlur={e  => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.background = '#f8fafc' }}
+        />
+        {observacoesCoord && (
+          <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: '#94a3b8' }}>
+              {observacoesCoord.split('\n').filter(Boolean).length} linha(s) · {observacoesCoord.length} caracteres
+            </span>
+            <button
+              onClick={() => onObservacoesChange('')}
+              style={{
+                border: 'none', background: 'none', cursor: 'pointer',
+                fontSize: 11, color: '#94a3b8', padding: '2px 6px',
+              }}
+            >
+              Limpar
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Tarefa 2: Gerar PDF + SPA ── */}
+      <div style={{
+        border: `1.5px solid ${tarefaSPACoordConf ? '#86efac' : tarefaFormConcluida ? '#e2e8f0' : '#f1f5f9'}`,
+        borderRadius: 10,
+        background: tarefaSPACoordConf ? '#f0fdf4' : '#fff',
+        padding: '16px 20px',
+        opacity: tarefaFormConcluida ? 1 : 0.55,
+        transition: 'opacity 0.3s',
+      }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+            background: tarefaSPACoordConf ? '#15803d' : tarefaFormConcluida ? '#475569' : '#cbd5e1',
+            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, fontWeight: 700,
+          }}>
+            {tarefaSPACoordConf ? '✓' : '2'}
+          </div>
+
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b', marginBottom: 4 }}>
+              Gerar formulário, baixar e enviar ao SPA
+            </div>
+            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, marginBottom: 12 }}>
+              Gera o formulário oficial "Validação de Disciplinas" da UFSC preenchido com as decisões
+              acima, abre o SOLAR/SPA para anexar o documento ao processo.
+            </div>
+
+            {tarefaSPACoordConf ? (
+              <div style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>
+                ✓ Formulário enviado ao SPA
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <button
+                  onClick={onGerarPDF}
+                  disabled={gerandoPDF || !tarefaFormConcluida}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '9px 18px', borderRadius: 8, border: 'none',
+                    background: gerandoPDF || !tarefaFormConcluida ? '#94a3b8' : '#00499f',
+                    color: '#fff', fontSize: 13, fontWeight: 600,
+                    cursor: (gerandoPDF || !tarefaFormConcluida) ? 'default' : 'pointer',
+                    alignSelf: 'flex-start', transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!gerandoPDF && tarefaFormConcluida) e.currentTarget.style.background = '#1d4ed8' }}
+                  onMouseLeave={e => { if (!gerandoPDF && tarefaFormConcluida) e.currentTarget.style.background = '#00499f' }}
+                >
+                  {gerandoPDF ? '⏳ Gerando PDF…' : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1v8M4 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M2 12h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                      Gerar formulário PDF e abrir SPA
+                    </>
+                  )}
+                </button>
+
+                {tarefaPDFBaixado && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={tarefaSPACoordConf}
+                      onChange={e => e.target.checked && onConfirmarSPACoord()}
+                      style={{ width: 16, height: 16, accentColor: '#15803d', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: 13, color: '#475569' }}>
+                      Confirmo que o formulário foi enviado ao SPA
+                    </span>
+                  </label>
+                )}
+
+                {!tarefaPDFBaixado && tarefaFormConcluida && (
+                  <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                    Clique no botão acima para gerar o PDF e abrir o SPA.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Banner de conclusão */}
+      {tarefaSPACoordConf && (
+        <div style={{
+          background: '#f0fdf4', border: '1px solid #86efac',
+          borderRadius: 10, padding: '12px 18px',
+          display: 'flex', alignItems: 'center', gap: 10,
+          fontSize: 13, color: '#15803d', fontWeight: 600,
+        }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M5 8l2.5 2.5L11 5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Todas as tarefas concluídas — avançando para Concluído…
+        </div>
+      )}
+
+      </div>{/* fim do wrapper somenteLeitura */}
+    </div>
+  )
+}
+
+// ── Aba Tarefas SIG ────────────────────────────────────────────────────────────
+function AbaTarefasSIG({
+  req,
+  anexos,
+  tarefaSpaIniciada,
+  tarefaSpaConfirmada,
+  onBaixarEAbrirSPA,
+  onConfirmarSpa,
+  numeroProcesso,
+  onNumeroProcessoChange,
+  onSalvarProcesso,
+  salvandoProcesso,
+  erroProcesso,
+  editandoProcesso,
+  onEditarProcesso,
+  onCancelarEdicao,
+}) {
+  const [baixando, setBaixando] = useState(false)
+
+  const isFaseSIG        = ['triagem_sig', 'em_analise_coord'].includes(req.status)
+  const tarefaProcessoSalvo = Boolean(req.numero_processo)
+  const concluidas       = (tarefaSpaConfirmada ? 1 : 0) + (tarefaProcessoSalvo ? 1 : 0)
+  const todasConcluidas  = tarefaSpaConfirmada && tarefaProcessoSalvo
+
+  if (!isFaseSIG) {
+    return (
+      <div className="form-card" style={{ textAlign: 'center', padding: '56px 32px' }}>
+        <div style={{ fontSize: 36, marginBottom: 14 }}>✅</div>
+        <div style={{ fontWeight: 600, fontSize: 15, color: '#64748b', marginBottom: 8 }}>
+          Sem tarefas pendentes nesta fase
+        </div>
+        <p style={{ fontSize: 13, color: '#94a3b8', maxWidth: 380, margin: '0 auto', lineHeight: 1.7 }}>
+          As tarefas SIG são ativadas nas fases de Triagem SIG e Análise SIG.
+        </p>
+      </div>
+    )
+  }
+
+  async function handleBaixar() {
+    setBaixando(true)
+    await onBaixarEAbrirSPA()
+    setBaixando(false)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 700 }}>
+
+      {/* Cabeçalho com progresso */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15, color: '#1e293b' }}>Tarefas da Fase SIG</div>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+            {concluidas} de 2 concluídas
+            {todasConcluidas && ' · Avançando para Coordenação…'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 90, height: 6, background: '#e2e8f0', borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{
+              width: `${concluidas * 50}%`, height: '100%',
+              background: todasConcluidas ? '#15803d' : '#00499f',
+              borderRadius: 6, transition: 'width 0.4s',
+            }} />
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: todasConcluidas ? '#15803d' : '#64748b' }}>
+            {concluidas}/2
+          </span>
+        </div>
+      </div>
+
+      {/* ── Tarefa 1: Adicionar arquivos no SPA ── */}
+      <div style={{
+        border: `1.5px solid ${tarefaSpaConfirmada ? '#86efac' : '#e2e8f0'}`,
+        borderRadius: 10, background: tarefaSpaConfirmada ? '#f0fdf4' : '#fff',
+        padding: '16px 20px',
+      }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+          {/* Número/check */}
+          <div style={{
+            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+            background: tarefaSpaConfirmada ? '#15803d' : '#00499f',
+            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, fontWeight: 700,
+          }}>
+            {tarefaSpaConfirmada ? '✓' : '1'}
+          </div>
+
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b', marginBottom: 4 }}>
+              Adicionar arquivos no SPA
+            </div>
+            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, marginBottom: 12 }}>
+              Baixe todos os documentos do requerimento e adicione-os ao processo no SOLAR/SPA da UFSC.
+              {anexos.length > 0 && (
+                <span style={{ marginLeft: 6, fontWeight: 600, color: '#475569' }}>
+                  ({anexos.length} {anexos.length === 1 ? 'documento' : 'documentos'})
+                </span>
+              )}
+            </div>
+
+            {tarefaSpaConfirmada ? (
+              <div style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>
+                ✓ Arquivos confirmados no SPA
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <button
+                  onClick={handleBaixar}
+                  disabled={baixando}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '8px 16px', borderRadius: 8, border: 'none',
+                    background: baixando ? '#94a3b8' : '#00499f',
+                    color: '#fff', fontSize: 13, fontWeight: 600,
+                    cursor: baixando ? 'default' : 'pointer',
+                    alignSelf: 'flex-start', transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!baixando) e.currentTarget.style.background = '#1d4ed8' }}
+                  onMouseLeave={e => { if (!baixando) e.currentTarget.style.background = '#00499f' }}
+                >
+                  {baixando ? '⏳ Preparando downloads…' : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1v8M4 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M2 12h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                      Baixar documentos e abrir SPA
+                    </>
+                  )}
+                </button>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={tarefaSpaConfirmada}
+                    onChange={e => e.target.checked && onConfirmarSpa()}
+                    style={{ width: 16, height: 16, accentColor: '#15803d', cursor: 'pointer' }}
+                  />
+                  <span style={{ fontSize: 13, color: '#475569' }}>
+                    Confirmo que os arquivos foram adicionados ao SPA
+                  </span>
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Tarefa 2: Número do processo ── */}
+      <div style={{
+        border: `1.5px solid ${tarefaProcessoSalvo ? '#86efac' : '#e2e8f0'}`,
+        borderRadius: 10, background: tarefaProcessoSalvo ? '#f0fdf4' : '#fff',
+        padding: '16px 20px',
+      }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+            background: tarefaProcessoSalvo ? '#15803d' : '#475569',
+            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, fontWeight: 700,
+          }}>
+            {tarefaProcessoSalvo ? '✓' : '2'}
+          </div>
+
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#1e293b', marginBottom: 4 }}>
+              Adicionar número do processo
+            </div>
+            <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.6, marginBottom: 12 }}>
+              Informe o número do processo gerado no SPA após a abertura do protocolo.
+            </div>
+
+            {tarefaProcessoSalvo && !editandoProcesso ? (
+              <div>
+                <div style={{ fontSize: 13, color: '#15803d', fontWeight: 600, marginBottom: 8 }}>
+                  ✓ Processo registrado
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{
+                    fontFamily: 'monospace', fontSize: 14, fontWeight: 700, color: '#1e293b',
+                    background: '#f0fdf4', border: '1px solid #86efac',
+                    borderRadius: 6, padding: '6px 12px', display: 'inline-block',
+                  }}>
+                    {req.numero_processo}
+                  </div>
+                  <button
+                    onClick={onEditarProcesso}
+                    style={{
+                      border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff',
+                      padding: '5px 12px', fontSize: 12, fontWeight: 600, color: '#475569',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✏ Editar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    value={numeroProcesso}
+                    onChange={e => onNumeroProcessoChange(e.target.value)}
+                    placeholder="Ex: 23080.012345/2024-67"
+                    style={{
+                      padding: '8px 12px', borderRadius: 7,
+                      border: `1px solid ${erroProcesso ? '#fca5a5' : '#e2e8f0'}`,
+                      fontSize: 13, color: '#1e293b', background: '#fff',
+                      outline: 'none', minWidth: 260, fontFamily: 'monospace',
+                    }}
+                    onKeyDown={e => e.key === 'Enter' && numeroProcesso.trim() && onSalvarProcesso()}
+                    autoFocus={editandoProcesso}
+                  />
+                  <button
+                    onClick={onSalvarProcesso}
+                    disabled={salvandoProcesso || !numeroProcesso.trim()}
+                    style={{
+                      padding: '8px 16px', borderRadius: 7, border: 'none',
+                      background: (!numeroProcesso.trim() || salvandoProcesso) ? '#e2e8f0' : '#00499f',
+                      color: (!numeroProcesso.trim() || salvandoProcesso) ? '#94a3b8' : '#fff',
+                      fontSize: 13, fontWeight: 600,
+                      cursor: (!numeroProcesso.trim() || salvandoProcesso) ? 'default' : 'pointer',
+                      transition: 'background 0.15s',
+                    }}
+                  >
+                    {salvandoProcesso ? 'Salvando…' : 'Salvar'}
+                  </button>
+                  {editandoProcesso && (
+                    <button
+                      onClick={onCancelarEdicao}
+                      style={{
+                        padding: '8px 14px', borderRadius: 7, border: '1px solid #e2e8f0',
+                        background: '#fff', color: '#64748b', fontSize: 13, fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                </div>
+                {erroProcesso && (
+                  <div style={{ fontSize: 12, color: '#b91c1c' }}>{erroProcesso}</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Banner de avanço automático */}
+      {todasConcluidas && (
+        <div style={{
+          background: '#f0fdf4', border: '1px solid #86efac',
+          borderRadius: 10, padding: '12px 18px',
+          display: 'flex', alignItems: 'center', gap: 10,
+          fontSize: 13, color: '#15803d', fontWeight: 600,
+        }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M5 8l2.5 2.5L11 5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Todas as tarefas concluídas — avançando para Coordenação…
+        </div>
+      )}
+
+    </div>
+  )
+}
+
+
+
 // ── Card de validação expansível ───────────────────────────────────────────────
 function ValidacaoCard({ v, idx }) {
   const [aberto, setAberto] = useState(true)
@@ -879,7 +1843,7 @@ function ValidacaoCard({ v, idx }) {
   const iaConfianca = v.ia_confianca
 
   return (
-    <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, overflow: 'hidden' }}>
+    <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, overflow: 'hidden', backgroundColor: '#ffffff' }}>
       <button
         onClick={() => setAberto(a => !a)}
         style={{
@@ -988,22 +1952,40 @@ function ValidacaoCard({ v, idx }) {
             </div>
           )}
 
-          {v.decisao && (
-            <div style={{
-              marginTop: 16, padding: '10px 14px', borderRadius: 8,
-              background: v.decisao === 'aprovado' ? '#f0fdf4' : '#fef2f2',
-              border: `1px solid ${v.decisao === 'aprovado' ? '#bbf7d0' : '#fecaca'}`,
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: v.decisao === 'aprovado' ? '#15803d' : '#b91c1c' }}>
-                Decisão: {v.decisao.charAt(0).toUpperCase() + v.decisao.slice(1)}
+          {v.decisao && (() => {
+            const isDef = v.decisao === 'aprovado'
+            let obs = {}
+            try { obs = JSON.parse(v.decisao_observacao || '{}') } catch {}
+            const itens = [
+              obs.carga_horaria ? `C.H.: ${obs.carga_horaria}h` : null,
+              obs.mencao         ? `Menção: ${obs.mencao}`       : null,
+              obs.nota != null   ? `Nota: ${obs.nota}`           : null,
+            ].filter(Boolean)
+            return (
+              <div style={{
+                marginTop: 16, padding: '10px 14px', borderRadius: 8,
+                background: isDef ? '#f0fdf4' : '#fef2f2',
+                border: `1px solid ${isDef ? '#bbf7d0' : '#fecaca'}`,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: isDef ? '#15803d' : '#b91c1c', marginBottom: itens.length ? 8 : 0 }}>
+                  {isDef ? '✓ Deferido' : '✗ Indeferido'}
+                </div>
+                {itens.length > 0 && (
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    {itens.map(item => (
+                      <span key={item} style={{
+                        fontSize: 12, color: '#475569', background: '#fff',
+                        borderRadius: 6, padding: '3px 10px',
+                        border: '1px solid #e2e8f0', fontWeight: 600,
+                      }}>
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-              {v.decisao_observacao && (
-                <p style={{ fontSize: 13, color: '#475569', margin: '6px 0 0', lineHeight: 1.6 }}>
-                  {v.decisao_observacao}
-                </p>
-              )}
-            </div>
-          )}
+            )
+          })()}
         </div>
       )}
     </div>

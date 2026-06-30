@@ -2,13 +2,25 @@
 *, *::before, *::after {
   font-family: 'Inter', sans-serif;
   box-sizing: border-box;
+  color-scheme: light; /* força light em todos os elementos, evita dark mode do sistema */
 }
 
 body {
   background-color: #eaecf4;
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
+  color-scheme: light;
 }
+
+/* Botões sem estilo não devem herdar cor do sistema em dark mode */
+button {
+  color-scheme: light;
+}
+
+/* Esconde scrollbars visíveis em containers internos (ex: tab bar no Windows) */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 
 /* ============ UFSC HEADER ============ */
 .ufsc-header {
@@ -184,10 +196,14 @@ body {
 .field-input.error { border-color: #c92020; }
 
 .field-err {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: #c92020;
   font-size: 11px;
   font-weight: 600;
   margin-top: 4px;
+  line-height: 1.4;
 }
 
 /* ============ GRID HELPERS ============ */
@@ -604,7 +620,7 @@ body {
 }
 
 .file-remove:hover { color: #d02020; }
-.file-err-msg { color: #c92020; font-size: 11px; font-weight: 600; margin-top: 6px; }
+.file-err-msg { display: flex; align-items: center; gap: 5px; color: #c92020; font-size: 11px; font-weight: 600; margin-top: 6px; line-height: 1.4; }
 
 /* ============ REVIEW ============ */
 .review-block {
@@ -855,6 +871,133 @@ body {
   background: #b8c8e0 !important;
   box-shadow: none !important;
   transform: none !important;
+}
+
+/* ============ REQUERIMENTO DETALHE — LAYOUT RESPONSIVO ============ */
+.detalhe-container {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px 24px 40px;
+}
+
+/* Barra de abas: scroll horizontal sem scrollbar visível */
+.detalhe-abas {
+  display: flex;
+  background-color: #fff;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.detalhe-abas::-webkit-scrollbar { display: none; }
+
+/* Grid da aba "Informações Gerais": esquerda fixa (360px) + conteúdo */
+.detalhe-geral-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* Split-pane de documentos */
+.detalhe-docs-split {
+  display: flex;
+  gap: 16px;
+  height: calc(100vh - 280px);
+  min-height: 480px;
+}
+
+.detalhe-docs-lista {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Tabela de decisões da coordenação */
+.detalhe-coord-wrap {
+  overflow-x: auto;
+}
+
+.detalhe-coord-header,
+.detalhe-coord-row {
+  display: grid;
+  grid-template-columns: 1fr 100px 90px 70px auto;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Label de campo que aparece só em mobile (substituindo o header da tabela) */
+.coord-mobile-label {
+  display: none;
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+/* ── Breakpoint médio: tablet landscape ── */
+@media (max-width: 960px) {
+  .detalhe-container {
+    padding: 12px 14px 32px;
+  }
+  .detalhe-geral-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Breakpoint pequeno: tablet portrait / mobile ── */
+@media (max-width: 700px) {
+  .detalhe-container {
+    padding: 8px 10px 24px;
+  }
+
+  /* Docs split vira coluna: lista horizontal em cima, preview embaixo */
+  .detalhe-docs-split {
+    flex-direction: column;
+    height: auto;
+    min-height: unset;
+  }
+  .detalhe-docs-lista {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-right: 0;
+    padding-bottom: 4px;
+    flex-shrink: unset;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .detalhe-docs-lista::-webkit-scrollbar { display: none; }
+  .detalhe-docs-lista > button {
+    min-width: 190px;
+    flex-shrink: 0;
+  }
+
+  /* Coord table: esconde header, cada linha vira bloco 2 colunas */
+  .detalhe-coord-header {
+    display: none;
+  }
+  .detalhe-coord-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+  }
+  /* Coluna "Disciplina" e "Notas" ocupam largura total */
+  .detalhe-coord-row > div:first-child,
+  .detalhe-coord-row > div:last-child {
+    grid-column: 1 / -1;
+  }
+  /* Exibe labels de campo em mobile */
+  .coord-mobile-label {
+    display: block;
+  }
 }
 
 /* ============ RESPONSIVE ============ */

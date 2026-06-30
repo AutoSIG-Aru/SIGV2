@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { gerarRequerimentoPDF, ASSINA_UFSC_URL } from '../../../services/pdfGenerator'
+import { gerarRequerimentoPDF, ASSINA_UFSC_URL } from '../../../services/pdfAluno'
 
-export default function StepRequerimento({ aluno, validacoes, onNext, onBack }) {
+export default function StepRequerimento({ aluno, validacoes, tipo = 'validacao', onNext, onBack }) {
   const [baixado, setBaixado] = useState(false)
   const [gerando, setGerando] = useState(false)
   const [erroGeracao, setErroGeracao] = useState('')
@@ -11,7 +11,7 @@ export default function StepRequerimento({ aluno, validacoes, onNext, onBack }) 
     setGerando(true)
     try {
       // Gera e baixa o PDF (async — carrega o brasão antes de gerar)
-      await gerarRequerimentoPDF(aluno, validacoes)
+      await gerarRequerimentoPDF(aluno, validacoes, tipo)
       // Abre o Assina UFSC em uma nova guia
       window.open(ASSINA_UFSC_URL, '_blank', 'noopener,noreferrer')
       setBaixado(true)
@@ -43,7 +43,9 @@ export default function StepRequerimento({ aluno, validacoes, onNext, onBack }) 
             <div style={{ fontSize: 13, color: '#444' }}>CAMPUS ARARANGUÁ</div>
             <div style={{ fontSize: 13, color: '#444' }}>COORDENAÇÃO ACADÊMICA INTEGRADA</div>
             <div style={{ fontSize: 16, fontWeight: 900, marginTop: 8, color: '#00296b' }}>
-              REQUERIMENTO PARA VALIDAÇÃO DE DISCIPLINAS
+              {tipo === 'equivalencia'
+                ? 'REQUERIMENTO PARA EQUIVALÊNCIA DE DISCIPLINAS'
+                : 'REQUERIMENTO PARA VALIDAÇÃO DE DISCIPLINAS'}
             </div>
           </div>
 
@@ -68,7 +70,7 @@ export default function StepRequerimento({ aluno, validacoes, onNext, onBack }) 
             {validacoes.map((v, vi) => (
               <div key={vi} style={{ marginTop: 14 }}>
                 <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>
-                  {v.mesmaInstituicao ? '🎓 Validação Interna' : '🏛️ Validação Externa'}
+                  {v.mesmaInstituicao ? 'Validação Interna' : 'Validação Externa'}
                 </div>
                 <div style={{ marginBottom: 8, fontSize: 13 }}>
                   <b>UFSC:</b> {v.ufsc.codigo} – {v.ufsc.nome}
@@ -131,7 +133,7 @@ export default function StepRequerimento({ aluno, validacoes, onNext, onBack }) 
 
           {baixado && (
             <div className="download-success">
-              <span aria-hidden="true">✅</span>
+              <span aria-hidden="true">✓</span>
               <span>
                 PDF baixado com sucesso. Assine o documento em{' '}
                 <a href={ASSINA_UFSC_URL} target="_blank" rel="noopener noreferrer">
@@ -145,7 +147,7 @@ export default function StepRequerimento({ aluno, validacoes, onNext, onBack }) 
 
         {/* Instrução de impressão */}
         <div className="instructions-box" style={{ marginTop: 20 }}>
-          <b>📌 Próximos passos:</b>
+          <b>Próximos passos:</b>
           <ul>
             <li>Baixe o requerimento clicando no botão acima.</li>
             <li>Assine digitalmente no <strong>Assina UFSC</strong> (abre em nova guia).</li>

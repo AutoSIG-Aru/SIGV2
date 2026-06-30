@@ -36,11 +36,6 @@ export default function UfscHeader({ navigate }) {
           <div className="ufsc-uni-name">Universidade Federal de Santa Catarina</div>
           <div className="ufsc-campus">Campus Araranguá</div>
         </div>
-        <div className="ufsc-divider" />
-        <div className="ufsc-doc-block">
-          <div className="ufsc-doc-label">Documento Oficial</div>
-          <div className="ufsc-doc-title">Requerimento para Validação de Disciplinas</div>
-        </div>
       </div>
       <div className="ufsc-gold-bar" />
     </header>

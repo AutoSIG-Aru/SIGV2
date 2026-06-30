@@ -22,6 +22,8 @@ export const STEP_LABELS = ['Dados & Disciplinas', 'Requerimento', 'Documentos',
 
 export const newCursada = () => ({
   instituicao: '',
+  cursoOrigem: '',
+  cursoOrigemOutro: '',
   codigo: '',
   nome: '',
   carga: '',
@@ -29,8 +31,9 @@ export const newCursada = () => ({
   ementa: '',
 })
 
-export const newValidacao = () => ({
-  mesmaInstituicao: false,
+export const newValidacao = (tipo = 'validacao') => ({
+  // Equivalência é sempre interna (UFSC)
+  mesmaInstituicao: tipo === 'equivalencia',
   ufsc: { codigo: '', nome: '' },
   cursadas: [newCursada()],
   justificativa: '',

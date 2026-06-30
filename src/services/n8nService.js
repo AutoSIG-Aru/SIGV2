@@ -1,56 +1,86 @@
-// Base do n8n — todos os webhooks derivam daqui.
-// Em produção, troque pelo domínio real (ex: https://n8n.ufsc.br).
-const N8N_BASE =
-  import.meta.env.VITE_N8N_BASE_URL || 'http://localhost:5678'
+// ── n8nService.js — Comunicação com o n8n ─────────────────────────────────────
+//
+// Dois webhooks:
+//   VITE_N8N_WEBHOOK_URL    → disparo na submissão de um novo requerimento
+//   VITE_N8N_WEBHOOK_STATUS → disparo quando o status de um requerimento muda
+//
+// Ambos enviam apenas referências e metadados — nunca arquivos em base64.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Webhook principal: recebe o requerimento completo
+const N8N_BASE = import.meta.env.VITE_N8N_BASE_URL || 'http://localhost:5678'
+
 const N8N_WEBHOOK_URL =
   import.meta.env.VITE_N8N_WEBHOOK_URL || `${N8N_BASE}/webhook/sig-requerimento`
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+const N8N_WEBHOOK_STATUS =
+  import.meta.env.VITE_N8N_WEBHOOK_STATUS || `${N8N_BASE}/webhook/sig-status`
 
-/**
- * Converte um File em string base64 pura (sem o prefixo data:mime;base64,).
- * Usado para incluir os documentos no payload JSON.
- */
-function fileParaBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload  = () => resolve(reader.result.split(',')[1])
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
+const N8N_WEBHOOK_AI =
+  import.meta.env.VITE_N8N_WEBHOOK_AI || `${N8N_BASE}/webhook/sig-analise-ia`
+
+// ── Helper interno ─────────────────────────────────────────────────────────────
+
+async function postWebhook(url, payload, timeoutMs = 30_000) {
+  const controller = new AbortController()
+  const timeoutId  = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+      signal:  controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: `n8n respondeu com HTTP ${res.status}` }
+    }
+
+    let response = null
+    const text = await res.text()
+    if (text) {
+      try { response = JSON.parse(text) } catch { response = text }
+    }
+
+    return { ok: true, status: res.status, response }
+  } catch (err) {
+    clearTimeout(timeoutId)
+    console.error('[n8n] Erro ao enviar para', url, err)
+    let error = err.message || String(err)
+    if (err.name === 'AbortError')       error = 'Tempo esgotado. O n8n não respondeu.'
+    if (error.includes('Failed to fetch')) error = 'Não foi possível conectar ao n8n.'
+    return { ok: false, error }
+  }
 }
 
-// ── Envio principal ────────────────────────────────────────────────────────────
+// ── Submissão de novo requerimento ────────────────────────────────────────────
 
 /**
- * Envia o requerimento ao n8n como JSON estruturado.
- * Todos os arquivos são convertidos para base64 e incluídos no payload,
- * cada um com sua categoria (req_assinado, historico, programa, controle, certif).
+ * Notifica o n8n após a gravação de um novo requerimento no Supabase.
  *
- * @param {Object} params
- * @param {Object} params.aluno       - Dados do aluno
- * @param {Array}  params.validacoes  - Array de validações
- * @param {string} params.protocolo   - Número do protocolo gerado no front
- * @param {Array}  params.documentos  - Array de { file: File, categoria: string }
- * @returns {Promise<{ ok: boolean, status?: number, error?: string, response?: any }>}
+ * Envia apenas referências (id + storage paths) — os arquivos já estão no
+ * Supabase Storage e o n8n os acessa diretamente via service_role key.
+ *
+ * @param {Object}  params
+ * @param {Object}  params.aluno           - Dados do aluno
+ * @param {Array}   params.validacoes      - Array de validações
+ * @param {number}  params.requerimentoId  - ID gerado pelo Supabase
+ * @param {Array}   params.storagePaths    - [{ categoria, storage_path, nome_original }]
+ * @param {string}  params.tipo            - 'validacao' | 'equivalencia'
  */
-export async function enviarParaN8n({ aluno, validacoes, protocolo, documentos = [] }) {
-  // Converte todos os arquivos para base64 em paralelo
-  const docsConvertidos = await Promise.all(
-    documentos.map(async ({ file, categoria }) => ({
-      categoria,                          // ex: 'req_assinado', 'historico', ...
-      nome_original: file.name,
-      mime_type:     file.type || 'application/octet-stream',
-      tamanho_bytes: file.size,
-      conteudo_base64: await fileParaBase64(file),
-    }))
-  )
-
+export async function enviarParaN8n({
+  aluno,
+  validacoes,
+  requerimentoId,
+  storagePaths = [],
+  tipo = 'validacao',
+}) {
   const payload = {
-    protocolo,
-    data_envio: new Date().toISOString(),
+    requerimento_id:   requerimentoId,
+    tipo_requerimento: tipo,
+    data_envio:        new Date().toISOString(),
 
     aluno: {
       nome:      aluno.nome,
@@ -62,7 +92,7 @@ export async function enviarParaN8n({ aluno, validacoes, protocolo, documentos =
     },
 
     total_validacoes: validacoes.length,
-    total_documentos: documentos.length,
+    total_documentos: storagePaths.length,
 
     validacoes: validacoes.map((v, i) => ({
       indice: i + 1,
@@ -75,58 +105,125 @@ export async function enviarParaN8n({ aluno, validacoes, protocolo, documentos =
       disciplinas_cursadas: v.cursadas.map(c => ({
         codigo:        c.codigo,
         nome:          c.nome,
-        instituicao:   c.instituicao,
-        carga_horaria: c.carga,
-        creditos:      c.creditos,
-        ementa:        c.ementa || null,
+        instituicao:   c.instituicao || null,
+        carga_horaria: c.carga       || null,
+        creditos:      c.creditos    || null,
+        ementa:        c.ementa      || null,
       })),
     })),
 
-    // Documentos com conteúdo base64 — o n8n decodifica e salva no MinIO/filesystem
-    documentos: docsConvertidos,
+    // Referências dos arquivos no Supabase Storage.
+    // n8n acessa cada arquivo via:
+    //   supabase.storage.from('anexos').download(storage_path)
+    documentos: storagePaths,
   }
 
-  try {
-    const controller = new AbortController()
-    // 60 s: arquivos base64 podem ser grandes
-    const timeoutId = setTimeout(() => controller.abort(), 60_000)
-
-    const res = await fetch(N8N_WEBHOOK_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
-      signal:  controller.signal,
-    })
-
-    clearTimeout(timeoutId)
-
-    if (!res.ok) {
-      return {
-        ok:     false,
-        status: res.status,
-        error:  `n8n respondeu com HTTP ${res.status} ${res.statusText}`,
-      }
-    }
-
-    let response = null
-    const text = await res.text()
-    if (text) {
-      try { response = JSON.parse(text) } catch { response = text }
-    }
-
-    return { ok: true, status: res.status, response }
-  } catch (err) {
-    console.error('[n8n] Erro ao enviar:', err)
-    let error = err.message || String(err)
-    if (err.name === 'AbortError') {
-      error = 'Tempo esgotado (60 s). O n8n não respondeu — verifique se o Docker está rodando.'
-    } else if (error.includes('Failed to fetch')) {
-      error =
-        'Não foi possível conectar ao n8n. Verifique se o Docker está rodando e se ' +
-        'o webhook permite CORS do navegador.'
-    }
-    return { ok: false, error }
-  }
+  return postWebhook(N8N_WEBHOOK_URL, payload)
 }
 
-export { N8N_WEBHOOK_URL, N8N_BASE }
+// ── Mudança de status ──────────────────────────────────────────────────────────
+
+/**
+ * Notifica o n8n quando o status de um requerimento muda.
+ * Chamado por statusService após a atualização no banco.
+ *
+ * O workflow n8n decide qual e-mail enviar com base no novo status:
+ *   parecer_coord → aviso para coordenação
+ *   concluido     → e-mail de resultado para o aluno (inclui decisoes se fornecido)
+ *
+ * @param {Object}  params
+ * @param {number}  params.requerimentoId   - ID do requerimento
+ * @param {string}  params.protocolo        - Protocolo do requerimento
+ * @param {string}  params.numeroProcesso   - Número do processo SPA (inserido pela SIG)
+ * @param {string}  params.statusAnterior   - Status antes da mudança
+ * @param {string}  params.novoStatus       - Novo status
+ * @param {string}  params.tipoRequerimento - 'validacao' | 'equivalencia'
+ * @param {Object}  params.aluno            - { nome, email, matricula, curso }
+ * @param {Array}   [params.decisoes]       - Decisões do coordenador (quando novoStatus === 'concluido')
+ *                                            [{ ufsc_codigo, ufsc_nome, decisao, mencao, nota }]
+ * @param {string}  [params.observacoes]    - Texto de observações do coordenador
+ */
+export async function notificarMudancaStatus({
+  requerimentoId,
+  protocolo,
+  numeroProcesso,
+  statusAnterior,
+  novoStatus,
+  tipoRequerimento = 'validacao',
+  aluno = {},
+  decisoes,
+  observacoes,
+}) {
+  const payload = {
+    requerimento_id:   requerimentoId,
+    protocolo:         protocolo      || null,
+    numero_processo:   numeroProcesso || null,
+    tipo_requerimento: tipoRequerimento,
+    status_anterior:   statusAnterior,
+    novo_status:       novoStatus,
+    timestamp:         new Date().toISOString(),
+
+    aluno: {
+      nome:      aluno.nome      || null,
+      email:     aluno.email     || null,
+      matricula: aluno.matricula || null,
+      curso:     aluno.curso     || null,
+    },
+  }
+
+  // Inclui decisões do coordenador somente quando o status é 'concluido'
+  if (novoStatus === 'concluido' && decisoes) {
+    payload.decisoes    = decisoes
+    payload.observacoes = observacoes || null
+  }
+
+  return postWebhook(N8N_WEBHOOK_STATUS, payload, 15_000)
+}
+
+// ── Análise de IA ─────────────────────────────────────────────────────────────
+
+/**
+ * Dispara o workflow de análise de IA no n8n.
+ *
+ * Envia APENAS dados técnicos das validações — sem dados pessoais do aluno
+ * (nome, matrícula, CPF, e-mail, telefone) e sem referências a documentos.
+ * O n8n buscará as ementas UFSC diretamente no Supabase (curriculo_disciplinas).
+ *
+ * @param {Object} params
+ * @param {number} params.requerimentoId   - ID do requerimento
+ * @param {string} params.curso            - Nome do curso (para buscar currículo)
+ * @param {string} params.tipo             - 'validacao' | 'equivalencia'
+ * @param {Array}  params.validacoes       - Validações do formulário
+ */
+export async function enviarParaAnaliseIA({
+  requerimentoId,
+  curso,
+  tipo = 'validacao',
+  validacoes = [],
+}) {
+  const payload = {
+    requerimento_id:   requerimentoId,
+    curso,
+    tipo_requerimento: tipo,
+    validacoes: validacoes.map((v, i) => ({
+      indice:          i + 1,
+      tipo:            v.mesmaInstituicao ? 'interna' : 'externa',
+      disciplina_ufsc: {
+        codigo: v.ufsc.codigo,
+        nome:   v.ufsc.nome,
+      },
+      justificativa: v.justificativa || null,
+      disciplinas_cursadas: v.cursadas.map(c => ({
+        codigo:        c.codigo        || null,
+        nome:          c.nome          || null,
+        carga_horaria: c.carga         || null,
+        creditos:      c.creditos      || null,
+        ementa:        c.ementa        || null,
+      })),
+    })),
+  }
+
+  return postWebhook(N8N_WEBHOOK_AI, payload, 30_000)
+}
+
+export { N8N_WEBHOOK_URL, N8N_WEBHOOK_STATUS, N8N_WEBHOOK_AI, N8N_BASE }

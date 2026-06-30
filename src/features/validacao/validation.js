@@ -37,14 +37,16 @@ export function isValidCPF(cpf) {
 }
 
 // Validate step 0 (aluno + validacoes)
-export function validateStep0(aluno, validacoes) {
+// tipo: 'validacao' | 'equivalencia'
+export function validateStep0(aluno, validacoes, tipo = 'validacao') {
+  const isEquivalencia = tipo === 'equivalencia'
   const erros = {}
 
   if (!aluno.nome.trim()) erros.nome = 'Nome obrigatório'
   if (!aluno.matricula.trim()) erros.matricula = 'Matrícula obrigatória'
-  // CPF é opcional (alunos estrangeiros podem não ter CPF)
-  // Mas, se preenchido, deve ser válido.
-  if (aluno.cpf.trim() && !isValidCPF(aluno.cpf)) {
+  if (!aluno.cpf.trim()) {
+    erros.cpf = 'CPF obrigatório'
+  } else if (!isValidCPF(aluno.cpf)) {
     erros.cpf = 'CPF inválido'
   }
   if (!aluno.curso) erros.curso = 'Selecione o curso'
@@ -59,13 +61,24 @@ export function validateStep0(aluno, validacoes) {
     const ve = {}
     if (!v.ufsc.codigo.trim()) ve.ufscCodigo = 'Código obrigatório'
     if (!v.ufsc.nome.trim()) ve.ufscNome = 'Nome obrigatório'
+
+    // Equivalência exige justificativa
+    if (isEquivalencia && !v.justificativa.trim()) ve.justificativa = 'Justificativa obrigatória'
+
     ve.cursadas = v.cursadas.map(c => {
       const ce = {}
       if (!c.codigo.trim()) ce.codigo = 'Obrigatório'
       if (!c.nome.trim()) ce.nome = 'Obrigatório'
-      if (!c.carga.trim()) ce.carga = 'Obrigatório'
-      if (!c.creditos.trim()) ce.creditos = 'Obrigatório'
-      if (!c.instituicao.trim()) ce.instituicao = 'Obrigatório'
+      // Validação exige carga horária e créditos
+      if (!isEquivalencia) {
+        if (!c.carga.trim()) ce.carga = 'Obrigatório'
+        if (!c.creditos.trim()) ce.creditos = 'Obrigatório'
+        if (!v.mesmaInstituicao && !c.instituicao.trim()) ce.instituicao = 'Obrigatório'
+        if (v.mesmaInstituicao && !c.cursoOrigem?.trim()) ce.cursoOrigem = 'Selecione o curso de origem'
+        if (v.mesmaInstituicao && c.cursoOrigem === 'Outro' && !c.cursoOrigemOutro?.trim()) {
+          ce.cursoOrigemOutro = 'Informe o curso'
+        }
+      }
       return ce
     })
     return ve
@@ -75,11 +88,13 @@ export function validateStep0(aluno, validacoes) {
 }
 
 // Validate step 2 (documents)
-export function validateStep2(docReqAssinado, docHistorico, docPrograma, docControleCurricular) {
+// tipo: 'validacao' | 'equivalencia'
+export function validateStep2(docReqAssinado, docHistorico, docPrograma, docControleCurricular, tipo = 'validacao') {
   const erros = {}
   if (docReqAssinado.length === 0) erros.reqAssinado = 'Requerimento assinado obrigatório'
   if (docHistorico.length === 0) erros.historico = 'Histórico escolar obrigatório'
-  if (docPrograma.length === 0) erros.planoEnsino = 'Programa/Plano de ensino obrigatório'
+  // Programa/Plano de Ensino só faz sentido para validação externa (outra instituição)
+  if (tipo !== 'equivalencia' && docPrograma.length === 0) erros.planoEnsino = 'Programa/Plano de ensino obrigatório'
   if (docControleCurricular.length === 0) erros.controleCurricular = 'Controle curricular obrigatório'
   return erros
 }

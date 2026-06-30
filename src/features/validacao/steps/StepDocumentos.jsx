@@ -8,7 +8,10 @@ export default function StepDocumentos({
   docCertif, setDocCertif,
   docErros,
   onNext, onBack,
+  tipo = 'validacao',
 }) {
+  const isEquivalencia = tipo === 'equivalencia'
+
   return (
     <div>
       <div className="form-card">
@@ -27,22 +30,26 @@ export default function StepDocumentos({
           />
           <UploadZone
             label="Histórico Escolar"
-            hint="Documento contendo as disciplinas cursadas e notas obtidas"
+            hint={isEquivalencia
+              ? 'Histórico escolar da UFSC com a disciplina cursada'
+              : 'Documento contendo as disciplinas cursadas e notas obtidas'}
             required
             multiple
             files={docHistorico}
             onChange={setDocHistorico}
             error={docErros.historico}
           />
-          <UploadZone
-            label="Programa / Plano de Ensino"
-            hint="Documento oficial da instituição de origem com o conteúdo programático"
-            required
-            multiple
-            files={docPrograma}
-            onChange={setDocPrograma}
-            error={docErros.planoEnsino}
-          />
+          {!isEquivalencia && (
+            <UploadZone
+              label="Programa / Plano de Ensino"
+              hint="Documento oficial da instituição de origem com o conteúdo programático"
+              required
+              multiple
+              files={docPrograma}
+              onChange={setDocPrograma}
+              error={docErros.planoEnsino}
+            />
+          )}
           <UploadZone
             label="Controle Curricular UFSC"
             hint="Documento de controle curricular emitido pelo sistema da UFSC"
@@ -52,8 +59,10 @@ export default function StepDocumentos({
             error={docErros.controleCurricular}
           />
           <UploadZone
-            label="Certificados e Outros Documentos"
-            hint="Seminários, cursos de extensão ou outros comprovantes relevantes"
+            label="Outros Documentos"
+            hint={isEquivalencia
+              ? 'Ementas, aprovações ou outros comprovantes relevantes'
+              : 'Seminários, cursos de extensão ou outros comprovantes relevantes'}
             multiple
             files={docCertif}
             onChange={setDocCertif}

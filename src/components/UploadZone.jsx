@@ -2,6 +2,17 @@ import { useState, useRef } from 'react'
 import { fileIcon, formatFileSize } from './fileUtils'
 import { MAX_FILE_SIZE, ACCEPTED_TYPES } from './uploadConstants'
 
+function IconErr() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+      aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }}>
+      <circle cx="6" cy="6" r="5.3" stroke="currentColor" strokeWidth="1.4"/>
+      <line x1="6" y1="3.5" x2="6" y2="7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <circle cx="6" cy="9" r="0.75" fill="currentColor"/>
+    </svg>
+  )
+}
+
 export default function UploadZone({ label, hint, required = false, multiple = false, files, onChange, error }) {
   const [dragOver, setDragOver] = useState(false)
   const [sizeError, setSizeError] = useState('')
@@ -15,7 +26,7 @@ export default function UploadZone({ label, hint, required = false, multiple = f
       if (f.size > MAX_FILE_SIZE) oversized.push(f.name)
       else valid.push(f)
     })
-    if (oversized.length) setSizeError(`Arquivo(s) muito grande(s) (máx 5MB): ${oversized.join(', ')}`)
+    if (oversized.length) setSizeError(`Arquivo(s) muito grande(s) (máx 15MB): ${oversized.join(', ')}`)
     if (valid.length === 0) return
     onChange(multiple ? [...files, ...valid] : [valid[0]])
   }
@@ -50,12 +61,12 @@ export default function UploadZone({ label, hint, required = false, multiple = f
         </div>
         {hint && <div className="upload-hint">{hint}</div>}
         <div className="upload-hint" style={{ marginTop: 8 }}>
-          Clique ou arraste arquivos (PDF, imagem, Word — máx. 5MB)
+          Clique ou arraste arquivos (PDF, imagem, Word — máx. 15MB)
         </div>
       </div>
 
-      {sizeError && <div className="file-err-msg">⚠️ {sizeError}</div>}
-      {error && <div className="file-err-msg">⚠️ {error}</div>}
+      {sizeError && <div className="file-err-msg"><IconErr /> {sizeError}</div>}
+      {error && <div className="file-err-msg"><IconErr /> {error}</div>}
 
       {files.length > 0 && (
         <div className="file-list">

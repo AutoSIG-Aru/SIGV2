@@ -1,0 +1,198 @@
+{
+  "name": "SIG — Novo Requerimento",
+  "nodes": [
+    {
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Webhook — Novo Requerimento",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 380],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sig-requerimento",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "a1b2c3d4-0001-4000-8000-000000000099"
+    },
+    {
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Preparar Dados",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [500, 380],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-001",
+              "name": "requerimento_id",
+              "value": "={{ $json.body.requerimento_id }}",
+              "type": "number"
+            },
+            {
+              "id": "field-002",
+              "name": "tipo_requerimento",
+              "value": "={{ $json.body.tipo_requerimento === 'equivalencia' ? 'Equivalência de Disciplinas' : 'Validação de Disciplinas' }}",
+              "type": "string"
+            },
+            {
+              "id": "field-003",
+              "name": "aluno_nome",
+              "value": "={{ $json.body.aluno.nome }}",
+              "type": "string"
+            },
+            {
+              "id": "field-004",
+              "name": "aluno_email",
+              "value": "={{ $json.body.aluno.email }}",
+              "type": "string"
+            },
+            {
+              "id": "field-005",
+              "name": "aluno_matricula",
+              "value": "={{ $json.body.aluno.matricula }}",
+              "type": "string"
+            },
+            {
+              "id": "field-006",
+              "name": "aluno_curso",
+              "value": "={{ $json.body.aluno.curso }}",
+              "type": "string"
+            },
+            {
+              "id": "field-007",
+              "name": "total_validacoes",
+              "value": "={{ $json.body.total_validacoes }}",
+              "type": "number"
+            },
+            {
+              "id": "field-008",
+              "name": "data_envio_formatada",
+              "value": "={{ new Date($json.body.data_envio).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }}",
+              "type": "string"
+            },
+            {
+              "id": "field-009",
+              "name": "disciplinas_lista",
+              "value": "={{ $json.body.validacoes.map((v, i) => `${i + 1}. ${v.disciplina_ufsc.codigo} — ${v.disciplina_ufsc.nome}`).join('\\n') }}",
+              "type": "string"
+            },
+            {
+              "id": "field-010",
+              "name": "disciplinas_lista_html",
+              "value": "={{ $json.body.validacoes.map((v, i) => `<li><strong>${v.disciplina_ufsc.codigo}</strong> — ${v.disciplina_ufsc.nome}</li>`).join('') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Email — Confirmação Aluno",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [760, 240],
+      "parameters": {
+        "fromEmail": "sig-araranguá@contato.ufsc.br",
+        "toEmail": "={{ $json.aluno_email }}",
+        "subject": "Requerimento #{{ $json.requerimento_id }} recebido — UFSC Araranguá",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'><style>body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:0}.container{max-width:600px;margin:32px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}.header{background:#00296b;color:#fff;padding:28px 32px}.header h1{margin:0;font-size:20px;font-weight:700}.body{padding:28px 32px;color:#334155;line-height:1.7}.badge{display:inline-block;background:#dbeafe;color:#1e40af;border-radius:20px;padding:4px 14px;font-size:13px;font-weight:700;margin-bottom:20px}.info-box{background:#f8faff;border:1px solid #dbeafe;border-radius:8px;padding:16px 20px;margin:20px 0}.info-box p{margin:4px 0;font-size:14px}.info-box strong{color:#1e40af}.disc-list{background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:16px 20px;margin:20px 0}.disc-list ul{margin:8px 0;padding-left:20px}.disc-list li{margin:6px 0;font-size:14px;color:#15803d}.footer{background:#f1f5f9;padding:18px 32px;font-size:12px;color:#64748b;text-align:center;border-top:1px solid #e2e8f0}</style></head><body><div class='container'><div class='header'><h1>UFSC — Campus Araranguá<br>Coordenação Acadêmica Integrada</h1></div><div class='body'><span class='badge'>{{ $json.tipo_requerimento }}</span><h2 style='margin:0 0 8px;color:#0f172a;font-size:18px'>Requerimento recebido com sucesso</h2><p>Olá, <strong>{{ $json.aluno_nome }}</strong>!</p><p>Seu requerimento de <strong>{{ $json.tipo_requerimento }}</strong> foi recebido e está em análise. Você receberá atualizações por e-mail conforme o processo avançar.</p><div class='info-box'><p><strong>Número do requerimento:</strong> #{{ $json.requerimento_id }}</p><p><strong>Matrícula:</strong> {{ $json.aluno_matricula }}</p><p><strong>Curso:</strong> {{ $json.aluno_curso }}</p><p><strong>Data de envio:</strong> {{ $json.data_envio_formatada }}</p></div><div class='disc-list'><p style='margin:0 0 8px;font-weight:700;color:#065f46'>Disciplinas solicitadas ({{ $json.total_validacoes }}):</p><ul>{{ $json.disciplinas_lista_html }}</ul></div><p>Em caso de dúvidas, entre em contato com a Coordenação Acadêmica Integrada da UFSC Araranguá respondendo a este e-mail.</p><p>Atenciosamente,<br><strong>Coordenação Acadêmica Integrada<br>UFSC — Campus Araranguá</strong></p></div><div class='footer'>Este é um e-mail automático. Por favor, não responda diretamente a esta mensagem.<br>UFSC Araranguá — Rua Pedro João Pereira, 150, Mato Alto, Araranguá/SC</div></div></body></html>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "SUBSTITUIR_PELO_ID_DA_CREDENCIAL_SMTP",
+          "name": "SMTP SIG UFSC"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0004-4000-8000-000000000004",
+      "name": "Email — Aviso Interno SIG",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [760, 520],
+      "parameters": {
+        "fromEmail": "sig-araranguá@contato.ufsc.br",
+        "toEmail": "={{ $vars.EMAIL_SIG }}",
+        "subject": "[SIG] Novo requerimento #{{ $json.requerimento_id }} — {{ $json.aluno_curso }}",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'><style>body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:0}.container{max-width:600px;margin:32px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}.header{background:#1e40af;color:#fff;padding:24px 32px}.header h1{margin:0;font-size:18px;font-weight:700}.body{padding:28px 32px;color:#334155;line-height:1.7}.badge{display:inline-block;background:#fef3c7;color:#b45309;border-radius:20px;padding:4px 14px;font-size:12px;font-weight:700;margin-bottom:16px}.table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}.table th{background:#f1f5f9;text-align:left;padding:8px 12px;color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.05em}.table td{padding:10px 12px;border-bottom:1px solid #e2e8f0}.link-btn{display:inline-block;background:#1e40af;color:#fff;text-decoration:none;padding:10px 24px;border-radius:8px;font-weight:700;font-size:14px;margin-top:16px}.footer{background:#f1f5f9;padding:16px 32px;font-size:12px;color:#64748b;text-align:center}</style></head><body><div class='container'><div class='header'><h1>SIG — Novo Requerimento Recebido</h1></div><div class='body'><span class='badge'>{{ $json.tipo_requerimento }}</span><p>Um novo requerimento foi submetido e aguarda triagem.</p><table class='table'><tr><th>Campo</th><th>Valor</th></tr><tr><td><strong>ID</strong></td><td>#{{ $json.requerimento_id }}</td></tr><tr><td><strong>Aluno</strong></td><td>{{ $json.aluno_nome }}</td></tr><tr><td><strong>Matrícula</strong></td><td>{{ $json.aluno_matricula }}</td></tr><tr><td><strong>Curso</strong></td><td>{{ $json.aluno_curso }}</td></tr><tr><td><strong>E-mail</strong></td><td>{{ $json.aluno_email }}</td></tr><tr><td><strong>Tipo</strong></td><td>{{ $json.tipo_requerimento }}</td></tr><tr><td><strong>Nº disciplinas</strong></td><td>{{ $json.total_validacoes }}</td></tr><tr><td><strong>Recebido em</strong></td><td>{{ $json.data_envio_formatada }}</td></tr></table><p><strong>Disciplinas solicitadas:</strong></p><ul>{{ $json.disciplinas_lista_html }}</ul></div><div class='footer'>Acesse o painel SIG para visualizar os documentos e iniciar a triagem.</div></div></body></html>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "SUBSTITUIR_PELO_ID_DA_CREDENCIAL_SMTP",
+          "name": "SMTP SIG UFSC"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0005-4000-8000-000000000005",
+      "name": "Responder Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1020, 380],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, requerimento_id: $('Preparar Dados').item.json.requerimento_id }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — Novo Requerimento": {
+      "main": [
+        [
+          { "node": "Preparar Dados", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Preparar Dados": {
+      "main": [
+        [
+          { "node": "Email — Confirmação Aluno", "type": "main", "index": 0 },
+          { "node": "Email — Aviso Interno SIG", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Email — Confirmação Aluno": {
+      "main": [
+        [
+          { "node": "Responder Webhook", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Email — Aviso Interno SIG": {
+      "main": [
+        [
+          { "node": "Responder Webhook", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "a1b2c3d4-ffff-4000-8000-000000000000",
+  "id": "sig-novo-requerimento-v1",
+  "meta": {
+    "instanceId": "local",
+    "templateId": "sig-novo-requerimento"
+  },
+  "tags": [
+    { "id": "tag-sig", "name": "SIG" },
+    { "id": "tag-email", "name": "email" }
+  ]
+}

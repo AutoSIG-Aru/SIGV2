@@ -1,7 +1,25 @@
 import { CURSOS, FIELD_LABELS } from '../constants'
 import { formatCPF, formatTelefone } from '../validation'
 
-export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, erros, validacaoErros, onNext, newCursada, newValidacao }) {
+// ── Ícone de erro inline ──────────────────────────────────────────────────────
+function IconErr() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+      aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }}>
+      <circle cx="6" cy="6" r="5.3" stroke="currentColor" strokeWidth="1.4"/>
+      <line x1="6" y1="3.5" x2="6" y2="7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <circle cx="6" cy="9" r="0.75" fill="currentColor"/>
+    </svg>
+  )
+}
+
+function FieldErr({ msg }) {
+  if (!msg) return null
+  return <div className="field-err"><IconErr />{msg}</div>
+}
+
+export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, erros, validacaoErros, onNext, newCursada, newValidacao, tipo = 'validacao' }) {
+  const isEquivalencia = tipo === 'equivalencia'
   function updateAluno(field, value) {
     setAluno(prev => ({ ...prev, [field]: value }))
   }
@@ -81,12 +99,21 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
       <div className="form-card">
         <div className="instructions-box">
           <b>Instruções Importantes</b>
-          <ul>
-            <li>Preencha todos os campos obrigatórios antes de avançar.</li>
-            <li>Para cada disciplina da UFSC, informe a(s) disciplina(s) equivalente(s) cursada(s).</li>
-            <li>Validação <b>Interna</b>: disciplinas cursadas na própria UFSC. <b>Externa</b>: outra instituição.</li>
-            <li>Anexe a documentação comprobatória na etapa seguinte.</li>
-          </ul>
+          {isEquivalencia ? (
+            <ul>
+              <li>Preencha todos os campos obrigatórios antes de avançar.</li>
+              <li>Informe a disciplina da UFSC que deseja usar como equivalente.</li>
+              <li>A disciplina cursada deve ter sido realizada em outro curso da própria UFSC.</li>
+              <li>Inclua uma justificativa explicando a equivalência solicitada.</li>
+            </ul>
+          ) : (
+            <ul>
+              <li>Preencha todos os campos obrigatórios antes de avançar.</li>
+              <li>Para cada disciplina da UFSC, informe a(s) disciplina(s) equivalente(s) cursada(s).</li>
+              <li>Validação <b>Interna</b>: disciplinas cursadas na própria UFSC. <b>Externa</b>: outra instituição.</li>
+              <li>Anexe a documentação comprobatória na etapa seguinte.</li>
+            </ul>
+          )}
           <div className="decree">Este formulário está em conformidade com o Decreto Federal nº 8.539/2015.</div>
         </div>
       </div>
@@ -99,13 +126,14 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
 
         <div style={{ marginBottom: 16 }}>
           <label className="field-label">Nome Completo *</label>
+
           <input
             className={`field-input ${erros.nome ? 'error' : ''}`}
             placeholder="Seu nome completo"
             value={aluno.nome}
             onChange={e => updateAluno('nome', e.target.value)}
           />
-          {erros.nome && <div className="field-err">⚠️ {erros.nome}</div>}
+          <FieldErr msg={erros.nome} />
         </div>
 
         <div className="grid-2" style={{ marginBottom: 16 }}>
@@ -117,17 +145,17 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
               value={aluno.matricula}
               onChange={e => updateAluno('matricula', e.target.value.replace(/\D/g, ''))}
             />
-            {erros.matricula && <div className="field-err">⚠️ {erros.matricula}</div>}
+            <FieldErr msg={erros.matricula} />
           </div>
           <div>
-            <label className="field-label">CPF (opcional)</label>
+            <label className="field-label">CPF *</label>
             <input
               className={`field-input ${erros.cpf ? 'error' : ''}`}
               placeholder="000.000.000-00"
               value={aluno.cpf}
               onChange={e => updateAluno('cpf', formatCPF(e.target.value))}
             />
-            {erros.cpf && <div className="field-err">⚠️ {erros.cpf}</div>}
+            <FieldErr msg={erros.cpf} />
           </div>
         </div>
 
@@ -141,20 +169,20 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
             <option value="">Selecione seu curso...</option>
             {CURSOS.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          {erros.curso && <div className="field-err">⚠️ {erros.curso}</div>}
+          <FieldErr msg={erros.curso} />
         </div>
 
         <div className="grid-2">
           <div>
-            <label className="field-label">E-mail Institucional *</label>
+            <label className="field-label">E-mail *</label>
             <input
               className={`field-input ${erros.email ? 'error' : ''}`}
               type="email"
-              placeholder="nome@grad.ufsc.br"
+              placeholder="seu@email.com"
               value={aluno.email}
               onChange={e => updateAluno('email', e.target.value)}
             />
-            {erros.email && <div className="field-err">⚠️ {erros.email}</div>}
+            <FieldErr msg={erros.email} />
           </div>
           <div>
             <label className="field-label">Telefone / WhatsApp *</label>
@@ -164,7 +192,7 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
               value={aluno.telefone}
               onChange={e => updateAluno('telefone', formatTelefone(e.target.value))}
             />
-            {erros.telefone && <div className="field-err">⚠️ {erros.telefone}</div>}
+            <FieldErr msg={erros.telefone} />
           </div>
         </div>
       </div>
@@ -172,7 +200,8 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
       {/* ---- DISCIPLINAS ---- */}
       <div className="form-card">
         <div className="section-header">
-          <span className="step-num">2</span>Disciplinas para Validação
+          <span className="step-num">2</span>
+          {isEquivalencia ? 'Disciplinas para Equivalência' : 'Disciplinas para Validação'}
         </div>
 
         {validacoes.map((v, vi) => {
@@ -185,7 +214,7 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
 
               {/* Disciplina UFSC */}
               <div className="sub-card">
-                <div className="sub-label">🎓 Disciplina UFSC (que deseja validar)</div>
+                <div className="sub-label">Disciplina UFSC (que deseja validar)</div>
                 <div className="grid-2">
                   <div>
                     <label className="field-label">Código *</label>
@@ -195,7 +224,7 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
                       value={v.ufsc.codigo}
                       onChange={e => updateUfsc(vi, 'codigo', e.target.value.toUpperCase())}
                     />
-                    {vErr.ufscCodigo && <div className="field-err">⚠️ {vErr.ufscCodigo}</div>}
+                    <FieldErr msg={vErr.ufscCodigo} />
                   </div>
                   <div>
                     <label className="field-label">Nome da Disciplina *</label>
@@ -205,26 +234,30 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
                       value={v.ufsc.nome}
                       onChange={e => updateUfsc(vi, 'nome', e.target.value)}
                     />
-                    {vErr.ufscNome && <div className="field-err">⚠️ {vErr.ufscNome}</div>}
+                    <FieldErr msg={vErr.ufscNome} />
                   </div>
                 </div>
               </div>
 
-              {/* Tipo de Validação */}
-              <div style={{ marginBottom: 14 }}>
-                <label className="field-label">Tipo de Validação</label>
-                <div className="toggle-row">
-                  <button type="button" className={`toggle-opt ${!v.mesmaInstituicao ? 'on' : ''}`} onClick={() => setTipo(vi, false)}>
-                    🏛️ Externa (outra instituição)
-                  </button>
-                  <button type="button" className={`toggle-opt ${v.mesmaInstituicao ? 'on' : ''}`} onClick={() => setTipo(vi, true)}>
-                    🎓 Interna (própria UFSC)
-                  </button>
+              {/* Tipo de Validação — oculto para Equivalência (sempre interna) */}
+              {!isEquivalencia && (
+                <div style={{ marginBottom: 14 }}>
+                  <label className="field-label">Tipo de Validação</label>
+                  <div className="toggle-row">
+                    <button type="button" className={`toggle-opt ${!v.mesmaInstituicao ? 'on' : ''}`} onClick={() => setTipo(vi, false)}>
+                      Externa (outra instituição)
+                    </button>
+                    <button type="button" className={`toggle-opt ${v.mesmaInstituicao ? 'on' : ''}`} onClick={() => setTipo(vi, true)}>
+                      Interna (própria UFSC)
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Disciplinas Cursadas */}
-              <div className="sub-label">📚 Disciplina(s) Cursada(s) Equivalente(s)</div>
+              <div className="sub-label">
+                {isEquivalencia ? 'Disciplina Cursada na UFSC (outro curso)' : 'Disciplina(s) Cursada(s) Equivalente(s)'}
+              </div>
               {v.cursadas.map((c, ci) => {
                 const cErr = (vErr.cursadas || [])[ci] || {}
                 return (
@@ -233,48 +266,96 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
                       <button type="button" className="btn-remove" onClick={() => removeCursada(vi, ci)} title="Remover">✕</button>
                     )}
 
-                    {(!v.mesmaInstituicao || ci === 0) && (
+                    {/* Externa: campo livre de instituição */}
+                    {!isEquivalencia && !v.mesmaInstituicao && ci === 0 && (
                       <div style={{ marginBottom: 12 }}>
                         <label className="field-label">Instituição de Origem *</label>
                         <input
                           className={`field-input ${cErr.instituicao ? 'error' : ''}`}
-                          placeholder={v.mesmaInstituicao ? 'UFSC' : 'Nome da Instituição'}
+                          placeholder="Nome da Instituição"
                           value={c.instituicao}
                           onChange={e => updateCursada(vi, ci, 'instituicao', e.target.value)}
                         />
-                        {cErr.instituicao && <div className="field-err">⚠️ {cErr.instituicao}</div>}
+                        <FieldErr msg={cErr.instituicao} />
                       </div>
                     )}
 
-                    <div className="grid-4">
-                      {['codigo', 'nome', 'carga', 'creditos'].map(field => (
-                        <div key={field}>
-                          <label className="field-label">{FIELD_LABELS[field]} *</label>
+                    {/* Interna: select do curso de origem na UFSC */}
+                    {!isEquivalencia && v.mesmaInstituicao && ci === 0 && (
+                      <div style={{ marginBottom: 12 }}>
+                        <label className="field-label">Curso de Origem (UFSC) *</label>
+                        <select
+                          className={`field-input ${cErr.cursoOrigem ? 'error' : ''}`}
+                          value={c.cursoOrigem || ''}
+                          onChange={e => {
+                            updateCursada(vi, ci, 'cursoOrigem', e.target.value)
+                            if (e.target.value !== 'Outro') updateCursada(vi, ci, 'cursoOrigemOutro', '')
+                          }}
+                        >
+                          <option value="">Selecione o curso...</option>
+                          {CURSOS.map(cr => <option key={cr} value={cr}>{cr}</option>)}
+                          <option value="Outro">Outro campus da UFSC</option>
+                        </select>
+                        {c.cursoOrigem === 'Outro' && (
                           <input
-                            className={`field-input ${cErr[field] ? 'error' : ''}`}
-                            value={c[field]}
-                            onChange={e => updateCursada(vi, ci, field, e.target.value)}
+                            className={`field-input ${cErr.cursoOrigemOutro ? 'error' : ''}`}
+                            style={{ marginTop: 8 }}
+                            placeholder="Ex: Engenharia Civil — UFSC Joinville"
+                            value={c.cursoOrigemOutro || ''}
+                            onChange={e => updateCursada(vi, ci, 'cursoOrigemOutro', e.target.value)}
                           />
-                          {cErr[field] && <div className="field-err">⚠️ {cErr[field]}</div>}
-                        </div>
-                      ))}
-                      <div className="col-span-full">
-                        <label className="field-label">Ementa / Conteúdo Programático</label>
-                        <textarea
-                          className="field-input"
-                          placeholder="Cole aqui a ementa completa da disciplina..."
-                          value={c.ementa}
-                          onChange={e => updateCursada(vi, ci, 'ementa', e.target.value)}
-                          rows={2}
-                          style={{ resize: 'vertical' }}
-                        />
+                        )}
+                        <FieldErr msg={cErr.cursoOrigem} />
                       </div>
-                    </div>
+                    )}
+
+                    {/* Equivalência: só código e nome */}
+                    {isEquivalencia ? (
+                      <div className="grid-2">
+                        {['codigo', 'nome'].map(field => (
+                          <div key={field}>
+                            <label className="field-label">{FIELD_LABELS[field]} *</label>
+                            <input
+                              className={`field-input ${cErr[field] ? 'error' : ''}`}
+                              value={c[field]}
+                              onChange={e => updateCursada(vi, ci, field, e.target.value)}
+                            />
+                            <FieldErr msg={cErr[field]} />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="grid-4">
+                        {['codigo', 'nome', 'carga', 'creditos'].map(field => (
+                          <div key={field}>
+                            <label className="field-label">{FIELD_LABELS[field]} *</label>
+                            <input
+                              className={`field-input ${cErr[field] ? 'error' : ''}`}
+                              value={c[field]}
+                              onChange={e => updateCursada(vi, ci, field, e.target.value)}
+                            />
+                            <FieldErr msg={cErr[field]} />
+                          </div>
+                        ))}
+                        <div className="col-span-full">
+                          <label className="field-label">Ementa / Conteúdo Programático</label>
+                          <textarea
+                            className="field-input"
+                            placeholder="Cole aqui a ementa completa da disciplina..."
+                            value={c.ementa}
+                            onChange={e => updateCursada(vi, ci, 'ementa', e.target.value)}
+                            rows={2}
+                            style={{ resize: 'vertical' }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
 
-              {v.cursadas.length < 3 && (
+              {/* Adicionar cursada — só para Validação */}
+              {!isEquivalencia && v.cursadas.length < 3 && (
                 <button type="button" className="btn-add-cursada" onClick={() => addCursada(vi)}>
                   <span style={{ fontSize: 16 }}>+</span> Adicionar Disciplina Equivalente
                 </button>
@@ -282,28 +363,33 @@ export default function StepDados({ aluno, setAluno, validacoes, setValidacoes, 
 
               {/* Justificativa */}
               <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #e8edf8' }}>
-                <label className="field-label">Justificativa Acadêmica</label>
+                <label className="field-label">
+                  {isEquivalencia ? 'Justificativa *' : 'Justificativa Acadêmica'}
+                </label>
                 <textarea
-                  className="field-input"
-                  placeholder="Descreva o motivo desta solicitação..."
+                  className={`field-input ${vErr.justificativa ? 'error' : ''}`}
+                  placeholder={isEquivalencia
+                    ? 'Explique por que as disciplinas são equivalentes...'
+                    : 'Descreva o motivo desta solicitação...'}
                   value={v.justificativa}
                   onChange={e => updateValidacao(vi, 'justificativa', e.target.value)}
-                  rows={2}
+                  rows={isEquivalencia ? 3 : 2}
                   style={{ resize: 'vertical' }}
                 />
+                <FieldErr msg={vErr.justificativa} />
               </div>
             </div>
           )
         })}
 
-        <button type="button" className="btn-add-validation" onClick={() => setValidacoes(prev => [...prev, newValidacao()])}>
+        <button type="button" className="btn-add-validation" onClick={() => setValidacoes(prev => [...prev, newValidacao(tipo)])}>
           <span style={{ fontSize: 30 }}>+</span>
-          <span>Adicionar Nova Solicitação de Validação</span>
+          <span>{isEquivalencia ? 'Adicionar Nova Equivalência' : 'Adicionar Nova Solicitação de Validação'}</span>
         </button>
       </div>
 
       <div className="wizard-nav">
-        <span />
+        <button type="button" className="btn-back" onClick={() => window.history.back()}>← Voltar</button>
         <button type="submit" className="submit-btn">Gerar Requerimento →</button>
       </div>
     </form>

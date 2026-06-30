@@ -1,0 +1,340 @@
+{
+  "name": "SIG — Mudança de Status",
+  "nodes": [
+    {
+      "id": "b2c3d4e5-0001-4000-8000-000000000001",
+      "name": "Webhook — Mudança de Status",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 460],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sig-status",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "b2c3d4e5-0001-4000-8000-000000000099"
+    },
+    {
+      "id": "b2c3d4e5-0002-4000-8000-000000000002",
+      "name": "Preparar Dados de Status",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [500, 460],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "sf-001",
+              "name": "requerimento_id",
+              "value": "={{ $json.body.requerimento_id }}",
+              "type": "number"
+            },
+            {
+              "id": "sf-002",
+              "name": "novo_status",
+              "value": "={{ $json.body.novo_status }}",
+              "type": "string"
+            },
+            {
+              "id": "sf-003",
+              "name": "status_anterior",
+              "value": "={{ $json.body.status_anterior }}",
+              "type": "string"
+            },
+            {
+              "id": "sf-004",
+              "name": "tipo_requerimento",
+              "value": "={{ $json.body.tipo_requerimento === 'equivalencia' ? 'Equivalência de Disciplinas' : 'Validação de Disciplinas' }}",
+              "type": "string"
+            },
+            {
+              "id": "sf-005",
+              "name": "aluno_nome",
+              "value": "={{ $json.body.aluno.nome }}",
+              "type": "string"
+            },
+            {
+              "id": "sf-006",
+              "name": "aluno_email",
+              "value": "={{ $json.body.aluno.email }}",
+              "type": "string"
+            },
+            {
+              "id": "sf-007",
+              "name": "aluno_matricula",
+              "value": "={{ $json.body.aluno.matricula }}",
+              "type": "string"
+            },
+            {
+              "id": "sf-008",
+              "name": "aluno_curso",
+              "value": "={{ $json.body.aluno.curso }}",
+              "type": "string"
+            },
+            {
+              "id": "sf-009",
+              "name": "timestamp_formatado",
+              "value": "={{ new Date($json.body.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }}",
+              "type": "string"
+            },
+            {
+              "id": "sf-010",
+              "name": "status_label",
+              "value": "={{ { triagem_sig: 'Triagem SIG', em_analise_coord: 'Em Análise', parecer_coord: 'Aguardando Parecer da Coordenação', concluido: 'Concluído' }[$json.body.novo_status] || $json.body.novo_status }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b2c3d4e5-0003-4000-8000-000000000003",
+      "name": "Roteamento por Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [760, 460],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-concluido",
+                    "leftValue": "={{ $json.novo_status }}",
+                    "rightValue": "concluido",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Concluído → Aluno"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-parecer",
+                    "leftValue": "={{ $json.novo_status }}",
+                    "rightValue": "parecer_coord",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Parecer → Coordenação"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-sig",
+                    "leftValue": "={{ $json.novo_status }}",
+                    "rightValue": "triagem_sig",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Triagem → SIG Interno"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-analise",
+                    "leftValue": "={{ $json.novo_status }}",
+                    "rightValue": "em_analise_coord",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Análise → SIG Interno"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0004-4000-8000-000000000004",
+      "name": "Email — Resultado ao Aluno",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1020, 220],
+      "parameters": {
+        "fromEmail": "sig-araranguá@contato.ufsc.br",
+        "toEmail": "={{ $json.aluno_email }}",
+        "subject": "Resultado do requerimento #{{ $json.requerimento_id }} — UFSC Araranguá",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'><style>body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:0}.container{max-width:600px;margin:32px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}.header{background:#15803d;color:#fff;padding:28px 32px}.header h1{margin:0;font-size:20px;font-weight:700}.body{padding:28px 32px;color:#334155;line-height:1.7}.info-box{background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:16px 20px;margin:20px 0}.info-box p{margin:4px 0;font-size:14px}.info-box strong{color:#15803d}.footer{background:#f1f5f9;padding:18px 32px;font-size:12px;color:#64748b;text-align:center;border-top:1px solid #e2e8f0}</style></head><body><div class='container'><div class='header'><h1>UFSC — Campus Araranguá<br>Coordenação Acadêmica Integrada</h1></div><div class='body'><h2 style='color:#15803d;margin:0 0 12px'>Seu requerimento foi concluído</h2><p>Olá, <strong>{{ $json.aluno_nome }}</strong>!</p><p>Informamos que o seu requerimento de <strong>{{ $json.tipo_requerimento }}</strong> foi analisado e está disponível para consulta.</p><div class='info-box'><p><strong>Número do requerimento:</strong> #{{ $json.requerimento_id }}</p><p><strong>Matrícula:</strong> {{ $json.aluno_matricula }}</p><p><strong>Curso:</strong> {{ $json.aluno_curso }}</p><p><strong>Status:</strong> Concluído</p><p><strong>Atualizado em:</strong> {{ $json.timestamp_formatado }}</p></div><p>Para consultar o resultado detalhado, compareça à Secretaria Acadêmica ou entre em contato com a Coordenação do seu curso.</p><p>Atenciosamente,<br><strong>Coordenação Acadêmica Integrada<br>UFSC — Campus Araranguá</strong></p></div><div class='footer'>Este é um e-mail automático. Por favor, não responda diretamente a esta mensagem.</div></div></body></html>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "SUBSTITUIR_PELO_ID_DA_CREDENCIAL_SMTP",
+          "name": "SMTP SIG UFSC"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0005-4000-8000-000000000005",
+      "name": "Email — Parecer para Coordenação",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1020, 400],
+      "parameters": {
+        "fromEmail": "sig-araranguá@contato.ufsc.br",
+        "toEmail": "={{ $vars.EMAIL_COORDENACAO }}",
+        "subject": "[SIG] Requerimento #{{ $json.requerimento_id }} aguarda seu parecer",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'><style>body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:0}.container{max-width:600px;margin:32px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}.header{background:#7c3aed;color:#fff;padding:24px 32px}.header h1{margin:0;font-size:18px;font-weight:700}.body{padding:28px 32px;color:#334155;line-height:1.7}.info-box{background:#f5f3ff;border:1px solid #c4b5fd;border-radius:8px;padding:16px 20px;margin:20px 0}.info-box p{margin:4px 0;font-size:14px}.info-box strong{color:#7c3aed}.footer{background:#f1f5f9;padding:16px 32px;font-size:12px;color:#64748b;text-align:center}</style></head><body><div class='container'><div class='header'><h1>SIG — Requerimento Aguardando Parecer</h1></div><div class='body'><p>Prezado(a) Coordenador(a),</p><p>Um requerimento de <strong>{{ $json.tipo_requerimento }}</strong> foi encaminhado para análise e aguarda o seu parecer.</p><div class='info-box'><p><strong>Número:</strong> #{{ $json.requerimento_id }}</p><p><strong>Aluno:</strong> {{ $json.aluno_nome }}</p><p><strong>Matrícula:</strong> {{ $json.aluno_matricula }}</p><p><strong>Curso:</strong> {{ $json.aluno_curso }}</p><p><strong>Tipo:</strong> {{ $json.tipo_requerimento }}</p><p><strong>Encaminhado em:</strong> {{ $json.timestamp_formatado }}</p></div><p>Acesse o painel da Coordenação para visualizar os documentos e registrar o parecer.</p><p>Atenciosamente,<br><strong>Secretaria Acadêmica Integrada<br>UFSC — Campus Araranguá</strong></p></div><div class='footer'>Este é um e-mail automático gerado pelo SIG — Sistema Integrado de Gestão.</div></div></body></html>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "SUBSTITUIR_PELO_ID_DA_CREDENCIAL_SMTP",
+          "name": "SMTP SIG UFSC"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0006-4000-8000-000000000006",
+      "name": "Email — Aviso Interno SIG",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1020, 580],
+      "parameters": {
+        "fromEmail": "sig-araranguá@contato.ufsc.br",
+        "toEmail": "={{ $vars.EMAIL_SIG }}",
+        "subject": "[SIG Interno] Requerimento #{{ $json.requerimento_id }} → {{ $json.status_label }}",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'><style>body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:0}.container{max-width:580px;margin:32px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08)}.header{background:#475569;color:#fff;padding:20px 28px}.header h1{margin:0;font-size:16px;font-weight:700}.body{padding:24px 28px;color:#334155;line-height:1.7;font-size:14px}.table{width:100%;border-collapse:collapse;margin:12px 0}.table td{padding:8px 10px;border-bottom:1px solid #e2e8f0}.table td:first-child{font-weight:600;color:#475569;width:40%}.footer{background:#f1f5f9;padding:14px 28px;font-size:11px;color:#94a3b8;text-align:center}</style></head><body><div class='container'><div class='header'><h1>SIG — Atualização de Status</h1></div><div class='body'><p>O status do requerimento abaixo foi atualizado.</p><table class='table'><tr><td>Requerimento</td><td>#{{ $json.requerimento_id }}</td></tr><tr><td>Aluno</td><td>{{ $json.aluno_nome }}</td></tr><tr><td>Matrícula</td><td>{{ $json.aluno_matricula }}</td></tr><tr><td>Curso</td><td>{{ $json.aluno_curso }}</td></tr><tr><td>Tipo</td><td>{{ $json.tipo_requerimento }}</td></tr><tr><td>Status anterior</td><td>{{ $json.status_anterior }}</td></tr><tr><td>Novo status</td><td><strong>{{ $json.status_label }}</strong></td></tr><tr><td>Atualizado em</td><td>{{ $json.timestamp_formatado }}</td></tr></table></div><div class='footer'>Aviso interno — SIG UFSC Araranguá</div></div></body></html>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "SUBSTITUIR_PELO_ID_DA_CREDENCIAL_SMTP",
+          "name": "SMTP SIG UFSC"
+        }
+      }
+    },
+    {
+      "id": "b2c3d4e5-0007-4000-8000-000000000007",
+      "name": "Responder Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1280, 460],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, requerimento_id: $json.requerimento_id, novo_status: $json.novo_status }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — Mudança de Status": {
+      "main": [
+        [
+          { "node": "Preparar Dados de Status", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Preparar Dados de Status": {
+      "main": [
+        [
+          { "node": "Roteamento por Status", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Roteamento por Status": {
+      "main": [
+        [{ "node": "Email — Resultado ao Aluno",        "type": "main", "index": 0 }],
+        [{ "node": "Email — Parecer para Coordenação",  "type": "main", "index": 0 }],
+        [{ "node": "Email — Aviso Interno SIG",         "type": "main", "index": 0 }],
+        [{ "node": "Email — Aviso Interno SIG",         "type": "main", "index": 0 }]
+      ]
+    },
+    "Email — Resultado ao Aluno": {
+      "main": [
+        [{ "node": "Responder Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Email — Parecer para Coordenação": {
+      "main": [
+        [{ "node": "Responder Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Email — Aviso Interno SIG": {
+      "main": [
+        [{ "node": "Responder Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "b2c3d4e5-ffff-4000-8000-000000000000",
+  "id": "sig-mudanca-status-v1",
+  "meta": {
+    "instanceId": "local",
+    "templateId": "sig-mudanca-status"
+  },
+  "tags": [
+    { "id": "tag-sig", "name": "SIG" },
+    { "id": "tag-email", "name": "email" }
+  ]
+}

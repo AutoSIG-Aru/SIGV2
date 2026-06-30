@@ -1,19 +1,18 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import StaffLayout from '../../layouts/StaffLayout'
-import { supabase } from '../../services/supabase'
-import { clearAuth } from '../../services/authService'
+import { onAuthChange, clearAuth, getSession } from '../../services/authService'
+import { listarRequerimentos, buscarPerfil } from '../../services/requerimentosService'
+import { alterarStatus } from '../../services/statusService'
 
 // ── Config visual por status ───────────────────────────────────────────────────
 const STATUS_CFG = {
-  novo:               { label: 'Novo',               cor: '#475569', bg: '#f1f5f9' },
-  em_revisao_ia:      { label: 'Revisão IA',         cor: '#7c3aed', bg: '#f5f3ff' },
-  triagem_sig:        { label: 'Triagem SIG',        cor: '#64748b', bg: '#f8fafc' },
-  em_analise_coord:   { label: 'Em análise SIG',     cor: '#1d4ed8', bg: '#eff6ff' },
-  parecer_coord:      { label: 'Parecer Coord.',     cor: '#1d4ed8', bg: '#eff6ff' },
-  aprovado:           { label: 'Aprovado',            cor: '#15803d', bg: '#f0fdf4' },
-  rejeitado:          { label: 'Rejeitado',           cor: '#b91c1c', bg: '#fef2f2' },
-  revisao_solicitada: { label: 'Revisão Solicitada', cor: '#c2410c', bg: '#fff7ed' }, //futuramente ativar um botao de revisao que vai abrir um modal para adicionar um pacer do motivo da revisao
-  cancelado:          { label: 'Cancelado',           cor: '#9ca3af', bg: '#f9fafb' }, // mesma situacao, mas nao sei se se aplica
+  novo:             { label: 'Novo',           cor: '#475569', bg: '#f1f5f9' },
+  em_revisao_ia:   { label: 'Revisão IA',     cor: '#7c3aed', bg: '#f5f3ff' },
+  triagem_sig:     { label: 'Triagem SIG',    cor: '#64748b', bg: '#f8fafc' },
+  em_analise_coord:{ label: 'Em análise SIG', cor: '#1d4ed8', bg: '#eff6ff' },
+  parecer_coord:      { label: 'Parecer Coord.',    cor: '#1d4ed8', bg: '#eff6ff' },
+  revisao_solicitada: { label: 'Revisão Solicitada', cor: '#b45309', bg: '#fffbeb' },
+  concluido:          { label: 'Concluído',          cor: '#15803d', bg: '#f0fdf4' },
 }
 
 // ── Colunas do Kanban ──────────────────────────────────────────────────────────
@@ -40,18 +39,11 @@ const KANBAN_COLUNAS = [
     statusIncluidos: ['parecer_coord', 'revisao_solicitada'],
   },
   {
-    id: 'aprovados',
-    label: 'Aprovados',
-    statusAlvo: 'aprovado',
+    id: 'concluido',
+    label: 'Concluído',
+    statusAlvo: 'concluido',
     cor: '#15803d', bg: '#f0fdf4', borda: '#86efac',
-    statusIncluidos: ['aprovado'],
-  },
-  {
-    id: 'rejeitados',
-    label: 'Rejeitados',
-    statusAlvo: 'rejeitado',
-    cor: '#b91c1c', bg: '#fef2f2', borda: '#fca5a5',
-    statusIncluidos: ['rejeitado', 'cancelado'],
+    statusIncluidos: ['concluido'],
   },
 ]
 
@@ -73,8 +65,8 @@ function filtrarPorBusca(r, busca) {
   if (!busca.trim()) return true
   const q = busca.toLowerCase()
   return (
-    r.protocolo?.toLowerCase().includes(q)  ||
-    r.nome_aluno?.toLowerCase().includes(q) ||
+    r.numero_processo?.toLowerCase().includes(q) ||
+    r.nome_aluno?.toLowerCase().includes(q)      ||
     r.matricula?.toLowerCase().includes(q)
   )
 }
@@ -108,9 +100,20 @@ function Badge({ label, cor, bg }) {
   )
 }
 
+// ── Config visual por tipo de requerimento ────────────────────────────────────
+const TIPO_CFG = {
+  validacao:    { cor: '#2563eb', bg: '#eff6ff', label: 'Validação',    borda: '#93c5fd' },
+  equivalencia: { cor: '#b45309', bg: '#fffbeb', label: 'Equivalência', borda: '#fcd34d' },
+}
+
+function tipoVisual(tipo) {
+  return TIPO_CFG[tipo] || TIPO_CFG.validacao
+}
+
 // ── Card Kanban (compacto) ─────────────────────────────────────────────────────
 function CardKanban({ r, onClick, draggable = false, onDragStart, onDragEnd }) {
   const cfg          = STATUS_CFG[r.status] || { label: r.status, cor: '#888', bg: '#f5f5f5' }
+  const tv           = tipoVisual(r.tipo_requerimento)
   const abertura     = tempoRelativo(r.criado_em)
   const atualizacao  = tempoRelativo(r.atualizado_em)
   const alertaAtraso = Math.round((Date.now() - new Date(r.criado_em)) / 3_600_000) > 72
@@ -122,26 +125,37 @@ function CardKanban({ r, onClick, draggable = false, onDragStart, onDragEnd }) {
       onDragEnd={onDragEnd}
       onClick={onClick}
       style={{
-        border: '1px solid #e2e8f0', borderRadius: 8,
+        borderTop: '1px solid #e2e8f0',
+        borderRight: '1px solid #e2e8f0',
+        borderBottom: '1px solid #e2e8f0',
+        borderLeft: `4px solid ${tv.cor}`,
+        borderRadius: 8,
         padding: '10px 12px',
         background: '#fff',
         cursor: draggable ? 'grab' : 'pointer',
-        transition: 'box-shadow 0.15s, border-color 0.15s',
+        transition: 'box-shadow 0.15s',
         userSelect: 'none',
       }}
-      onMouseEnter={e => {
-        e.currentTarget.style.boxShadow   = '0 2px 8px rgba(0,73,159,0.10)'
-        e.currentTarget.style.borderColor = '#a8c4f0'
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.boxShadow   = 'none'
-        e.currentTarget.style.borderColor = '#e2e8f0'
-      }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,73,159,0.10)' }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none' }}
     >
-      {/* Linha 1: protocolo + badge */}
+      {/* Faixa de tipo no topo */}
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        background: tv.bg, color: tv.cor,
+        border: `1px solid ${tv.borda}`,
+        borderRadius: 5, padding: '1px 8px',
+        fontSize: 10, fontWeight: 700,
+        textTransform: 'uppercase', letterSpacing: '0.05em',
+        marginBottom: 8,
+      }}>
+        {tv.label}
+      </div>
+
+      {/* Linha 1: nº processo + status */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5, flexWrap: 'wrap' }}>
         <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 10, color: '#00499f', flexShrink: 0 }}>
-          {r.protocolo}
+          #{r.id}
         </span>
         <Badge {...cfg} />
       </div>
@@ -166,7 +180,6 @@ function CardKanban({ r, onClick, draggable = false, onDragStart, onDragEnd }) {
           color: alertaAtraso ? '#b91c1c' : '#94a3b8',
           fontWeight: alertaAtraso ? 700 : 400,
         }}>
-          {/* Ícone calendário */}
           <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
             <rect x="1" y="2.5" width="10" height="8.5" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
             <line x1="4" y1="1" x2="4" y2="4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
@@ -177,7 +190,6 @@ function CardKanban({ r, onClick, draggable = false, onDragStart, onDragEnd }) {
         </span>
         {atualizacao && atualizacao !== abertura && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#94a3b8' }}>
-            {/* Ícone relógio */}
             <svg width="10" height="10" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0 }}>
               <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3"/>
               <path d="M6 3.5V6l1.5 1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
@@ -193,6 +205,7 @@ function CardKanban({ r, onClick, draggable = false, onDragStart, onDragEnd }) {
 // ── Card Lista (expandido) ─────────────────────────────────────────────────────
 function CardLista({ r, onClick }) {
   const cfg          = STATUS_CFG[r.status] || { label: r.status, cor: '#888', bg: '#f5f5f5' }
+  const tv           = tipoVisual(r.tipo_requerimento)
   const iaVeredicto  = r.sumario_ia?.veredicto
   const iaConfianca  = r.sumario_ia?.confianca
   const abertura     = tempoRelativo(r.criado_em)
@@ -206,25 +219,35 @@ function CardLista({ r, onClick }) {
     <div
       onClick={onClick}
       style={{
-        border: '1px solid #e2e8f0', borderRadius: 9,
+        borderTop: '1px solid #e2e8f0',
+        borderRight: '1px solid #e2e8f0',
+        borderBottom: '1px solid #e2e8f0',
+        borderLeft: `5px solid ${tv.cor}`,
+        borderRadius: 9,
         padding: '13px 17px',
         background: '#fff', cursor: 'pointer',
-        transition: 'box-shadow 0.15s, border-color 0.15s',
+        transition: 'box-shadow 0.15s',
       }}
-      onMouseEnter={e => {
-        e.currentTarget.style.boxShadow   = '0 2px 10px rgba(0,73,159,0.12)'
-        e.currentTarget.style.borderColor = '#a8c4f0'
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.boxShadow   = 'none'
-        e.currentTarget.style.borderColor = '#e2e8f0'
-      }}
+      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,73,159,0.12)' }}
+      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none' }}
     >
-      {/* Linha 1: protocolo + badges | data */}
+      {/* Linha 1: tipo | nº + badges de status/IA | data */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          {/* Tipo — destaque próprio, antes do status */}
+          <span style={{
+            background: tv.bg, color: tv.cor,
+            border: `1px solid ${tv.borda}`,
+            borderRadius: 5, padding: '2px 10px',
+            fontSize: 11, fontWeight: 700,
+            textTransform: 'uppercase', letterSpacing: '0.04em',
+          }}>
+            {tv.label}
+          </span>
+          {/* Separador visual */}
+          <span style={{ width: 1, height: 14, background: '#e2e8f0', display: 'inline-block', verticalAlign: 'middle' }} />
           <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 11, color: '#00499f' }}>
-            {r.protocolo}
+            #{r.id}
           </span>
           <Badge {...cfg} />
           {iaVeredicto && (
@@ -235,7 +258,6 @@ function CardLista({ r, onClick }) {
             />
           )}
         </div>
-        {/* Data no canto superior direito */}
         <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', flexShrink: 0, marginTop: 1 }}>
           {dataFormatada}
         </span>
@@ -270,7 +292,7 @@ function CardLista({ r, onClick }) {
 // ── Visão Kanban com drag-and-drop ────────────────────────────────────────────
 const KANBAN_COL_HEIGHT = 'calc(100vh - 310px)'
 
-function KanbanView({ requerimentos, navigate, onMoverCard }) {
+function KanbanView({ requerimentos, navigate, onMoverCard, isCoord = false }) {
   const [dragSobre, setDragSobre] = useState(null)
   const dragIdRef = useRef(null)
 
@@ -298,6 +320,15 @@ function KanbanView({ requerimentos, navigate, onMoverCard }) {
     dragIdRef.current = null
     const card = requerimentos.find(r => r.id === id)
     if (card && col.statusIncluidos.includes(card.status)) return
+    // Coordenador: só pode mover de parecer_coord para concluido
+    if (isCoord) {
+      if (!card || card.status !== 'parecer_coord' || col.statusAlvo !== 'concluido') return
+    } else {
+      // SIG: bloqueia mover fases de triagem diretamente para Coordenação ou Concluído
+      const SIG_STATUSES = ['novo', 'em_revisao_ia', 'triagem_sig', 'em_analise_coord']
+      const COLUNAS_BLOQ = ['coordenacao', 'concluido']
+      if (card && SIG_STATUSES.includes(card.status) && COLUNAS_BLOQ.includes(col.id)) return
+    }
     onMoverCard(id, col.statusAlvo)
   }
 
@@ -359,16 +390,19 @@ function KanbanView({ requerimentos, navigate, onMoverCard }) {
                 }}>
                   {isDragOver ? 'Soltar aqui' : 'Nenhum pedido'}
                 </div>
-              ) : cards.map(r => (
-                <CardKanban
-                  key={r.id}
-                  r={r}
-                  draggable
-                  onDragStart={e => handleDragStart(e, r)}
-                  onDragEnd={handleDragEnd}
-                  onClick={() => navigate(`/requerimento/${r.id}`)}
-                />
-              ))}
+              ) : cards.map(r => {
+                const podeDrag = !isCoord || r.status === 'parecer_coord'
+                return (
+                  <CardKanban
+                    key={r.id}
+                    r={r}
+                    draggable={podeDrag}
+                    onDragStart={podeDrag ? e => handleDragStart(e, r) : undefined}
+                    onDragEnd={handleDragEnd}
+                    onClick={() => navigate(`/requerimento/${r.id}`)}
+                  />
+                )
+              })}
             </div>
           </div>
         )
@@ -442,31 +476,38 @@ export default function Dashboard({ navigate }) {
   const [dataFim, setDataFim]           = useState('')
   const [presetAtivo, setPresetAtivo]   = useState('todos')
   const [filtroCurso, setFiltroCurso]   = useState('todos')
+  const [filtroTipo, setFiltroTipo]     = useState('todos')
   const [busca, setBusca]               = useState('')
 
   const carregarRequerimentos = useCallback(async () => {
     setCarregando(true); setErroLoad(null)
-    const { data, error } = await supabase
-      .from('requerimentos')
-      .select('id, protocolo, status, nome_aluno, matricula, curso, email, criado_em, atualizado_em, sumario_ia')
-      .order('criado_em', { ascending: false })
-    if (error) { setErroLoad('Não foi possível carregar os requerimentos.'); console.error(error) }
-    else setRequerimentos(data || [])
+    try {
+      const data = await listarRequerimentos()
+      setRequerimentos(data)
+    } catch (error) {
+      setErroLoad('Não foi possível carregar os requerimentos.')
+      console.error(error)
+    }
     setCarregando(false)
   }, [])
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) { navigate('/login'); return }
-      setUser(session.user)
-      const { data: u } = await supabase
-        .from('usuarios').select('perfil, nome, curso').eq('id', session.user.id).maybeSingle()
-      setPerfilUsuario(u)
-      setLoading(false)
-      carregarRequerimentos()
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session) navigate('/login')
+    // onAuthStateChange dispara INITIAL_SESSION imediatamente com o estado real
+    // da sessão — mais confiável que getSession() que pode retornar null
+    // durante o ciclo de auto-refresh do token Supabase.
+    const subscription = onAuthChange(async (event, session) => {
+      if (event === 'SIGNED_OUT') { navigate('/login'); return }
+      if (event === 'INITIAL_SESSION') {
+        // session pode ser null transitoriamente durante refresh do token;
+        // getSession() força a busca no storage e aguarda o refresh antes de desistir.
+        const s = session ?? await getSession()
+        if (!s) { navigate('/login'); return }
+        setUser(s.user)
+        const perfil = await buscarPerfil(s.user.id)
+        setPerfilUsuario(perfil)
+        setLoading(false)
+        carregarRequerimentos()
+      }
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -483,14 +524,14 @@ export default function Dashboard({ navigate }) {
   function handleDataFim(v)    { setDataFim(v);    setPresetAtivo('custom') }
 
   async function moverCard(requerimentoId, novoStatus) {
-    const statusOriginal = requerimentos.find(r => r.id === requerimentoId)?.status
+    const requerimento  = requerimentos.find(r => r.id === requerimentoId)
+    const statusOriginal = requerimento?.status
     setRequerimentos(prev =>
       prev.map(r => r.id === requerimentoId ? { ...r, status: novoStatus } : r)
     )
-    const { error } = await supabase.rpc('atualizar_status_requerimento', {
-      p_id: requerimentoId, p_status: novoStatus,
-    })
-    if (error) {
+    try {
+      await alterarStatus(requerimento, novoStatus)
+    } catch (error) {
       console.error('[Drag] Erro ao mover card:', error)
       setRequerimentos(prev =>
         prev.map(r => r.id === requerimentoId ? { ...r, status: statusOriginal ?? r.status } : r)
@@ -508,8 +549,9 @@ export default function Dashboard({ navigate }) {
   const filtrados = useMemo(() => requerimentos
     .filter(r => filtrarPorData(r, dataInicio, dataFim))
     .filter(r => filtroCurso === 'todos' || r.curso === filtroCurso)
+    .filter(r => filtroTipo  === 'todos' || (r.tipo_requerimento || 'validacao') === filtroTipo)
     .filter(r => filtrarPorBusca(r, busca)),
-    [requerimentos, dataInicio, dataFim, filtroCurso, busca]
+    [requerimentos, dataInicio, dataFim, filtroCurso, filtroTipo, busca]
   )
 
   const conta = (statusArr) => filtrados.filter(r => statusArr.includes(r.status)).length
@@ -519,8 +561,7 @@ export default function Dashboard({ navigate }) {
     { label: 'Triagem',     valor: conta(['novo', 'em_revisao_ia', 'triagem_sig']) },
     { label: 'Análise SIG', valor: conta(['em_analise_coord']) },
     { label: 'Coordenação', valor: conta(['parecer_coord', 'revisao_solicitada']) },
-    { label: 'Aprovados',   valor: conta(['aprovado']) },
-    { label: 'Rejeitados',  valor: conta(['rejeitado', 'cancelado']) },
+    { label: 'Concluído',   valor: conta(['concluido']) },
   ]
 
   if (loading) return (
@@ -577,18 +618,29 @@ export default function Dashboard({ navigate }) {
             ))}
           </div>
 
+          <div style={{ width: 1, height: 28, background: '#e2e8f0', flexShrink: 0 }} />
+
+          {/* Filtro por tipo de requerimento */}
+          <select
+            value={filtroTipo}
+            onChange={e => setFiltroTipo(e.target.value)}
+            style={{ ...inputStyle, paddingRight: 28 }}
+          >
+            <option value="todos">Todos os tipos</option>
+            <option value="validacao">Validação</option>
+            <option value="equivalencia">Equivalência</option>
+          </select>
+
+          {/* Filtro por curso — apenas SIG vê todos os cursos */}
           {isSIG && cursos.length > 0 && (
-            <>
-              <div style={{ width: 1, height: 28, background: '#e2e8f0', flexShrink: 0 }} />
-              <select
-                value={filtroCurso}
-                onChange={e => setFiltroCurso(e.target.value)}
-                style={{ ...inputStyle, paddingRight: 28 }}
-              >
-                <option value="todos">Todos os cursos</option>
-                {cursos.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </>
+            <select
+              value={filtroCurso}
+              onChange={e => setFiltroCurso(e.target.value)}
+              style={{ ...inputStyle, paddingRight: 28 }}
+            >
+              <option value="todos">Todos os cursos</option>
+              {cursos.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
           )}
 
           <button
@@ -614,7 +666,7 @@ export default function Dashboard({ navigate }) {
           </svg>
           <input
             type="text"
-            placeholder="Buscar por nome, matrícula ou nº do requerimento…"
+            placeholder="Buscar por nome, matrícula ou nº do processo…"
             value={busca}
             onChange={e => setBusca(e.target.value)}
             style={{
@@ -633,6 +685,57 @@ export default function Dashboard({ navigate }) {
               ✕
             </button>
           )}
+
+          <div style={{ width: 1, height: 24, background: '#e2e8f0', flexShrink: 0 }} />
+
+          {isSIG && <button
+            onClick={() => navigate('/usuarios')}
+            title="Gerenciar usuários do sistema"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 14px', borderRadius: 7,
+              border: '1px solid #bfdbfe', background: '#eff6ff',
+              color: '#00499f', fontSize: 12, fontWeight: 700,
+              cursor: 'pointer', flexShrink: 0, transition: 'background .15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#dbeafe' }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#eff6ff' }}
+          >
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <circle cx="5" cy="4" r="2.25" stroke="#00499f" strokeWidth="1.4"/>
+              <path d="M1.5 11c0-1.93 1.57-3.5 3.5-3.5S8.5 9.07 8.5 11" stroke="#00499f" strokeWidth="1.4" strokeLinecap="round"/>
+              <path d="M9.5 5.5v3M11 7H8" stroke="#00499f" strokeWidth="1.4" strokeLinecap="round"/>
+            </svg>
+            Usuários
+          </button>}
+
+          {isSIG && <button
+            onClick={() => navigate('/curriculo/atualizar')}
+            title="Enviar novo PDF de currículo de curso"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 14px',
+              borderRadius: 7,
+              border: '1px solid #bfdbfe',
+              background: '#eff6ff',
+              color: '#00499f',
+              fontSize: 12, fontWeight: 700,
+              cursor: 'pointer',
+              flexShrink: 0,
+              transition: 'background .15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#dbeafe' }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#eff6ff' }}
+          >
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <path d="M2 10.5V3.5C2 2.67 2.67 2 3.5 2H8l3 3v5.5c0 .83-.67 1.5-1.5 1.5h-6C2.67 12 2 11.33 2 10.5Z"
+                stroke="#00499f" strokeWidth="1.4" fill="none" />
+              <path d="M8 2v3h3" stroke="#00499f" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M7 8.5V6M5.5 7l1.5-1.5L8.5 7"
+                stroke="#00499f" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Atualizar currículo
+          </button>}
         </div>
 
         {/* ── Painel ── */}
@@ -689,7 +792,7 @@ export default function Dashboard({ navigate }) {
                 : 'Nenhum resultado para os filtros aplicados.'}
             </div>
           ) : visao === 'kanban' ? (
-            <KanbanView requerimentos={filtrados} navigate={navigate} onMoverCard={moverCard} />
+            <KanbanView requerimentos={filtrados} navigate={navigate} onMoverCard={moverCard} isCoord={!isSIG} />
           ) : (
             <ListView requerimentos={filtrados} navigate={navigate} contadores={contadores} />
           )}

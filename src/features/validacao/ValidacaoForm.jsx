@@ -12,38 +12,39 @@ import SuccessScreen from './SuccessScreen'
 import { initialAluno, newCursada, newValidacao } from './constants'
 import { validateStep0, validateStep2 } from './validation'
 
-// pdfGenerator e emailService estão em services/
-// Etapa 4 desta refatoração.
-import { enviarRequerimento, gerarProtocolo } from '../../services/emailService'
+import { enviarRequerimento } from '../../services/submissionService'
 
 /**
- * ValidacaoForm — wizard de 4 etapas para o aluno solicitar validação de
- * disciplinas. É a página renderizada na rota "/" (formulário público).
+ * ValidacaoForm — wizard de 4 etapas para o aluno solicitar validação ou
+ * equivalência de disciplinas.
  *
  * Estrutura:
- *   Step 0 → dados do aluno + disciplinas a validar
+ *   Step 0 → dados do aluno + disciplinas
  *   Step 1 → preview do requerimento + download/assinatura
  *   Step 2 → upload de documentos comprobatórios
  *   Step 3 → revisão e envio
  *
- * Recebe `navigate` pelo roteador (usado pelo PublicLayout/header).
+ * Recebe `navigate` e `tipo` ('validacao' | 'equivalencia') pelo roteador.
+ * Se tipo for inválido ou ausente, redireciona para a seleção.
  */
-export default function ValidacaoForm({ navigate }) {
+export default function ValidacaoForm({ navigate, tipo }) {
+  // Garante que tipo é válido
+  const tipoValido = tipo === 'validacao' || tipo === 'equivalencia' ? tipo : null
+
   // Wizard
   const [step, setStep]       = useState(0)
   const [enviado, setEnviado] = useState(false)
-  const [protocolo, setProtocolo] = useState('')
 
   // Dados do formulário
-  const [aluno, setAluno]         = useState(initialAluno)
-  const [validacoes, setValidacoes] = useState([newValidacao()])
+  const [aluno, setAluno]           = useState(initialAluno)
+  const [validacoes, setValidacoes] = useState([newValidacao(tipoValido)])
 
   // Documentos (por categoria)
-  const [docReqAssinado, setDocReqAssinado]           = useState([])
-  const [docHistorico, setDocHistorico]               = useState([])
-  const [docPrograma, setDocPrograma]                 = useState([])
+  const [docReqAssinado, setDocReqAssinado]             = useState([])
+  const [docHistorico, setDocHistorico]                 = useState([])
+  const [docPrograma, setDocPrograma]                   = useState([])
   const [docControleCurricular, setDocControleCurricular] = useState([])
-  const [docCertif, setDocCertif]                     = useState([])
+  const [docCertif, setDocCertif]                       = useState([])
 
   // Erros de validação
   const [erros, setErros]               = useState({})
@@ -64,7 +65,7 @@ export default function ValidacaoForm({ navigate }) {
   }
 
   function handleStep0Next() {
-    const { erros: e, validacaoErros: ve } = validateStep0(aluno, validacoes)
+    const { erros: e, validacaoErros: ve } = validateStep0(aluno, validacoes, tipoValido)
     const hasAlunoError     = Object.keys(e).length > 0
     const hasValidacaoError = ve.some(v => {
       if (v.ufscCodigo || v.ufscNome) return true
@@ -82,7 +83,7 @@ export default function ValidacaoForm({ navigate }) {
   }
 
   function handleStep2Next() {
-    const e = validateStep2(docReqAssinado, docHistorico, docPrograma, docControleCurricular)
+    const e = validateStep2(docReqAssinado, docHistorico, docPrograma, docControleCurricular, tipoValido)
     if (Object.keys(e).length > 0) {
       setDocErros(e)
       window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -102,25 +103,22 @@ export default function ValidacaoForm({ navigate }) {
     setEnvAviso('')
 
     try {
-      const prot = gerarProtocolo()
-      // Cada doc recebe sua categoria — o n8n usa isso para gravar na tabela `anexos`
       const allDocumentos = [
-        ...docReqAssinado.map(f      => ({ file: f, categoria: 'req_assinado' })),
-        ...docHistorico.map(f        => ({ file: f, categoria: 'historico' })),
-        ...docPrograma.map(f         => ({ file: f, categoria: 'programa' })),
+        ...docReqAssinado.map(f       => ({ file: f, categoria: 'req_assinado' })),
+        ...docHistorico.map(f         => ({ file: f, categoria: 'historico' })),
+        ...docPrograma.map(f          => ({ file: f, categoria: 'programa' })),
         ...docControleCurricular.map(f => ({ file: f, categoria: 'controle' })),
-        ...docCertif.map(f           => ({ file: f, categoria: 'certif' })),
+        ...docCertif.map(f            => ({ file: f, categoria: 'certif' })),
       ]
 
       const result = await enviarRequerimento({
         aluno,
         validacoes,
-        protocolo: prot,
         documentos: allDocumentos,
+        tipo: tipoValido,
       })
 
       if (result.success) {
-        setProtocolo(prot)
         if (result.aviso) setEnvAviso(result.aviso)
         setEnviado(true)
         window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -129,20 +127,17 @@ export default function ValidacaoForm({ navigate }) {
         setEnvErroDetalhe(result.mensagemErro || 'Falha desconhecida.')
       }
     } catch (err) {
-      // Qualquer exceção não tratada (rede, ReferenceError, etc.) cai aqui
-      // e é exibida na UI — evita que o botão fique travado em "Enviando…".
       console.error('[ValidacaoForm] Erro inesperado no envio:', err)
       setEnvErro(true)
       setEnvErroDetalhe(err?.message || String(err) || 'Erro inesperado durante o envio.')
     } finally {
-      // Roda mesmo em caso de exceção — garante que o spinner sempre para.
       setEnviando(false)
     }
   }
 
   function handleNovo() {
     setAluno(initialAluno)
-    setValidacoes([newValidacao()])
+    setValidacoes([newValidacao(tipoValido)])
     setDocReqAssinado([])
     setDocHistorico([])
     setDocPrograma([])
@@ -156,18 +151,23 @@ export default function ValidacaoForm({ navigate }) {
     setEnvErroDetalhe('')
     setEnvAviso('')
     setEnviado(false)
-    setProtocolo('')
     goToStep(0)
+  }
+
+  // Tipo inválido → redireciona para a seleção
+  if (!tipoValido) {
+    navigate('/')
+    return null
   }
 
   return (
     <PublicLayout navigate={navigate}>
       <div className="page-container">
         {enviado ? (
-          <SuccessScreen protocolo={protocolo} aluno={aluno} onNovo={handleNovo} />
+          <SuccessScreen aluno={aluno} onNovo={handleNovo} aviso={envAviso} />
         ) : (
           <>
-            <StepBar step={step} />
+            <StepBar step={step} tipo={tipoValido} />
 
             {step === 0 && (
               <StepDados
@@ -180,6 +180,7 @@ export default function ValidacaoForm({ navigate }) {
                 onNext={handleStep0Next}
                 newCursada={newCursada}
                 newValidacao={newValidacao}
+                tipo={tipoValido}
               />
             )}
 
@@ -187,6 +188,7 @@ export default function ValidacaoForm({ navigate }) {
               <StepRequerimento
                 aluno={aluno}
                 validacoes={validacoes}
+                tipo={tipoValido}
                 onNext={() => goToStep(2)}
                 onBack={() => goToStep(0)}
               />
@@ -201,6 +203,7 @@ export default function ValidacaoForm({ navigate }) {
                 setDocControleCurricular={setDocControleCurricular}
                 docCertif={docCertif}           setDocCertif={setDocCertif}
                 docErros={docErros}
+                tipo={tipoValido}
                 onNext={handleStep2Next}
                 onBack={() => goToStep(1)}
               />

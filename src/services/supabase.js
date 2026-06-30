@@ -23,3 +23,12 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     detectSessionInUrl: true,   // processa o hash do magic link automaticamente
   },
 })
+
+// Força verificação de sessão ao voltar o foco para a aba.
+// Browsers limitam timers em abas inativas, o que pode atrasar o auto-refresh
+// do token Supabase e causar SIGNED_OUT inesperado após ~1 hora.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    supabase.auth.getSession()
+  }
+})

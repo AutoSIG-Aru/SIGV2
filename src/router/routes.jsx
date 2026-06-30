@@ -2,6 +2,9 @@ import LoginPage from '../features/staff/LoginPage'
 import AuthVerify from '../features/staff/AuthVerify'
 import Dashboard from '../features/staff/Dashboard'
 import RequerimentoDetalhe from '../features/staff/RequerimentoDetalhe'
+import AtualizarCurriculo from '../features/staff/AtualizarCurriculo'
+import UsuariosPage from '../features/staff/UsuariosPage'
+import TipoSelector from '../features/validacao/TipoSelector'
 import ValidacaoForm from '../features/validacao/ValidacaoForm'
 
 /**
@@ -23,11 +26,14 @@ import ValidacaoForm from '../features/validacao/ValidacaoForm'
  *   3. Pronto — sem mexer no App.jsx.
  */
 export const routes = [
-  { path: '/login',            component: LoginPage           },
-  { path: '/auth',             component: AuthVerify          },
-  { path: '/dashboard',        component: Dashboard           },
-  { path: '/requerimento/:id', component: RequerimentoDetalhe },
-  { path: '/',                 component: ValidacaoForm       },
+  { path: '/login',               component: LoginPage           },
+  { path: '/auth',                component: AuthVerify          },
+  { path: '/dashboard',           component: Dashboard           },
+  { path: '/curriculo/atualizar', component: AtualizarCurriculo  },
+  { path: '/usuarios',            component: UsuariosPage        },
+  { path: '/requerimento/:id',    component: RequerimentoDetalhe },
+  { path: '/solicitar/:tipo',     component: ValidacaoForm       },
+  { path: '/',                    component: TipoSelector        },
 ]
 
 /**

@@ -1,60 +1,28 @@
-// ── authService.js — Magic Link com Supabase Auth ─────────────────────────────
+// ── authService.js — Autenticação com Supabase Auth ───────────────────────────
 //
-// Fluxo:
-//   1. Usuário informa e-mail autorizado em /login
-//   2. Front verifica whitelist e chama solicitarMagicLink(email)
-//   3. Supabase envia e-mail com link → <origin>/auth#access_token=...
-//   4. Usuário clica → AuthVerify.jsx detecta a sessão via SDK
-//   5. Redireciona para /dashboard com sessão ativa
+// Login: apenas por e-mail + senha (signInWithPassword).
+// Recuperação: usuário esqueceu a senha → resetPasswordForEmail envia e-mail
+//              com link → /auth#type=recovery → AuthVerify exibe form de nova senha.
+// Convite: admin convida via Edge Function → link chega por e-mail
+//          → /auth#type=invite → AuthVerify exige definição de senha.
 //
 // Supabase cuida de: envio de e-mail, token, expiração, JWT, refresh automático.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { supabase } from './supabase'
 
-// ── Whitelist ──────────────────────────────────────────────────────────────────
-// Validada aqui (front) E pelo Supabase (shouldCreateUser: false).
-// Para adicionar alguém: cadastrar no painel Supabase + colocar aqui.
-
-export const EMAILS_PERMITIDOS = [
-  'monique.r.moraes@grad.ufsc.br',
-  'central.autosig@gmail.com',
-]
-
-// ── Magic link ─────────────────────────────────────────────────────────────────
+// ── Recuperação de senha ───────────────────────────────────────────────────────
 
 /**
- * Envia um magic link para o e-mail informado.
+ * Envia e-mail de recuperação de senha para o endereço informado.
  * Retorna { ok: true } ou { ok: false, error: string }.
- *
- * Pré-requisito no Supabase Dashboard:
- *   Authentication → URL Configuration → Redirect URLs
- *   Adicionar: http://localhost:5173/auth  (e o domínio de produção futuramente)
  */
-export async function solicitarMagicLink(email) {
-  const normalizado = email.toLowerCase().trim()
-
-  // Validação da whitelist antes de chamar o Supabase
-  if (!EMAILS_PERMITIDOS.includes(normalizado)) {
-    return { ok: false, error: 'E-mail não autorizado pelo administrador.' }
-  }
-
-  const { error } = await supabase.auth.signInWithOtp({
-    email: normalizado,
-    options: {
-      emailRedirectTo:  `${window.location.origin}/auth`,
-      shouldCreateUser: false, // só funciona para usuários já cadastrados no Supabase
-    },
-  })
-
-  if (error) {
-    // Mensagem amigável para o erro mais comum (usuário não cadastrado)
-    const msg = error.message?.toLowerCase().includes('not found') || error.status === 422
-      ? 'E-mail não cadastrado no sistema. Peça ao administrador para criar sua conta.'
-      : error.message || 'Erro ao enviar o link. Tente novamente.'
-    return { ok: false, error: msg }
-  }
-
+export async function enviarRecuperacaoSenha(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    email.toLowerCase().trim(),
+    { redirectTo: `${window.location.origin}/auth` },
+  )
+  if (error) return { ok: false, error: 'Não foi possível enviar o e-mail. Verifique o endereço e tente novamente.' }
   return { ok: true }
 }
 
@@ -77,6 +45,43 @@ export async function getSession() {
 export async function getUser() {
   const session = await getSession()
   return session?.user ?? null
+}
+
+// ── Login com senha ────────────────────────────────────────────────────────────
+
+/**
+ * Autentica com e-mail e senha.
+ * Retorna { ok: true } ou { ok: false, error: string }.
+ */
+export async function signInWithPassword(email, password) {
+  const { error } = await supabase.auth.signInWithPassword({
+    email: email.toLowerCase().trim(),
+    password,
+  })
+  if (error) return { ok: false, error: 'E-mail ou senha incorretos.' }
+  return { ok: true }
+}
+
+// ── Listener de estado de auth ─────────────────────────────────────────────────
+
+/**
+ * Registra um callback para mudanças de estado de autenticação.
+ * Retorna a subscription (chamar subscription.unsubscribe() no cleanup).
+ */
+export function onAuthChange(callback) {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(callback)
+  return subscription
+}
+
+// ── Atualização de senha ───────────────────────────────────────────────────────
+
+/**
+ * Atualiza a senha do usuário autenticado (usado em convite e recuperação).
+ * Retorna { error } — error é null se bem-sucedido.
+ */
+export async function updatePassword(password) {
+  const { error } = await supabase.auth.updateUser({ password })
+  return { error }
 }
 
 // ── Logout ─────────────────────────────────────────────────────────────────────
